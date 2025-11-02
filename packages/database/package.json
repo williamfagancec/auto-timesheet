@@ -1,0 +1,20 @@
+{
+  "name": "database",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "scripts": {
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio",
+    "db:generate": "prisma generate"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.8.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.8.0",
+    "typescript": "^5.3.3"
+  }
+}

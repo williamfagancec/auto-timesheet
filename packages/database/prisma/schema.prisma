@@ -1,0 +1,124 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+
+  sessions    Session[]
+  projects    Project[]
+  entries     TimesheetEntry[]
+  rules       CategoryRule[]
+  calendars   CalendarConnection[]
+  events      CalendarEvent[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model CalendarConnection {
+  id           String   @id @default(cuid())
+  userId       String
+  provider     String   @default("google")
+  accessToken  String
+  refreshToken String?
+  expiresAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Project {
+  id         String   @id @default(cuid())
+  userId     String
+  name       String
+  isArchived Boolean  @default(false)
+  lastUsedAt DateTime @default(now())
+  useCount   Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  user    User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entries TimesheetEntry[]
+  rules   CategoryRule[]
+
+  @@index([userId, lastUsedAt])
+}
+
+model CalendarEvent {
+  id            String   @id @default(cuid())
+  googleEventId String
+  userId        String
+  title         String
+  startTime     DateTime
+  endTime       DateTime
+  attendees     Json?
+  isAllDay      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entry TimesheetEntry?
+
+  @@unique([userId, googleEventId])
+  @@index([userId, startTime])
+}
+
+model TimesheetEntry {
+  id        String   @id @default(cuid())
+  userId    String
+  eventId   String?  @unique
+  projectId String?
+  date      DateTime
+  duration  Int // in minutes
+  isManual  Boolean  @default(false)
+  isSkipped Boolean  @default(false)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event   CalendarEvent? @relation(fields: [eventId], references: [id])
+  project Project?       @relation(fields: [projectId], references: [id])
+
+  @@index([userId, date])
+}
+
+model CategoryRule {
+  id         String   @id @default(cuid())
+  userId     String
+  ruleType   String
+  condition  String
+  projectId  String
+  confidence Float    @default(0.5)
+  matchCount Int      @default(0)
+  accuracy   Float    @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([userId, ruleType])
+}
