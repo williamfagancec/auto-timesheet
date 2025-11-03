@@ -10,6 +10,7 @@ export const lucia = new Lucia(adapter, {
   sessionCookie: {
     attributes: {
       secure: process.env.NODE_ENV === "production",
+      sameSite: "lax", // CSRF protection (httpOnly is true by default in Lucia)
     },
   },
   getUserAttributes: (attributes) => {

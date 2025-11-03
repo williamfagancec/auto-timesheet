@@ -1,6 +1,7 @@
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import cookie from '@fastify/cookie'
+import rateLimit from '@fastify/rate-limit'
 import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify'
 import { appRouter } from './routers/index.js'
 import { createContext } from './context.js'
@@ -20,6 +21,19 @@ await server.register(cors, {
 })
 
 await server.register(cookie)
+
+// Register rate limiting
+await server.register(rateLimit, {
+  max: 100, // Maximum 100 requests
+  timeWindow: '1 minute', // Per minute
+  cache: 10000, // Cache size
+  allowList: ['127.0.0.1'], // Whitelist localhost for development
+  addHeaders: {
+    'x-ratelimit-limit': true,
+    'x-ratelimit-remaining': true,
+    'x-ratelimit-reset': true,
+  },
+})
 
 // Register tRPC
 await server.register(fastifyTRPCPlugin, {

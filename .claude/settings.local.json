@@ -1,7 +1,27 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pnpm install:*)"
+      "Bash(pnpm install:*)",
+      "Bash(cat:*)",
+      "Bash(npx tsc:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(git -C /Users/williamfagan/Desktop/claudeCode/time-tracker diff apps/api/src/routers/auth.ts)",
+      "Bash(node -e:*)",
+      "Bash(pnpm add:*)",
+      "Bash(pnpm db:generate:*)",
+      "Bash(ln:*)",
+      "Bash(node:*)",
+      "Bash(npx prisma generate:*)",
+      "Bash(npx tsx:*)",
+      "Bash(npx prisma migrate:*)",
+      "Bash(export DATABASE_URL:*)",
+      "Bash(npx prisma db push:*)",
+      "Bash(migration.sql)",
+      "Bash(tree:*)",
+      "Bash(git add:*)",
+      "Bash(timeout 10 pnpm dev:*)",
+      "Bash(chmod:*)",
+      "Bash(./test-server-start.sh:*)"
     ],
     "deny": [],
     "ask": []

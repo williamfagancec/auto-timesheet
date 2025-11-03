@@ -5,7 +5,7 @@ import { prisma } from 'database'
 import { lucia } from '../auth/lucia.js'
 import { hashPassword, verifyPassword } from '../auth/password.js'
 import { google, GOOGLE_SCOPES } from '../auth/google.js'
-import { encrypt, decrypt } from '../auth/encryption.js'
+import { encrypt } from '../auth/encryption.js'
 import { generateCodeVerifier, generateState } from 'arctic'
 
 export const authRouter = router({
@@ -199,22 +199,56 @@ export const authRouter = router({
           },
         })
 
+        // Validate response status
+        if (!googleUserResponse.ok) {
+          let errorMessage = 'Failed to fetch Google account details'
+
+          try {
+            const errorBody = (await googleUserResponse.json()) as {
+              error?: string
+              error_description?: string
+            }
+            errorMessage = errorBody.error_description || errorBody.error || errorMessage
+          } catch {
+            // If error body can't be parsed, use status text
+            errorMessage = `${errorMessage}: ${googleUserResponse.statusText}`
+          }
+
+          throw new TRPCError({
+            code: googleUserResponse.status === 401 ? 'UNAUTHORIZED' : 'BAD_REQUEST',
+            message: errorMessage,
+          })
+        }
+
+        // Parse user info
         const googleUser = (await googleUserResponse.json()) as {
           id: string
-          email: string
+          email?: string
+          verified_email?: boolean
           name?: string
           picture?: string
         }
 
+        // Validate email presence and format
+        if (!googleUser.email || typeof googleUser.email !== 'string' || !googleUser.email.trim()) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Google account does not have a valid email address',
+          })
+        }
+
+        // Normalize email (lowercase, trim)
+        const normalizedEmail = googleUser.email.toLowerCase().trim()
+
         // Find or create user
         let user = await prisma.user.findUnique({
-          where: { email: googleUser.email },
+          where: { email: normalizedEmail },
         })
 
         if (!user) {
           user = await prisma.user.create({
             data: {
-              email: googleUser.email,
+              email: normalizedEmail,
               name: googleUser.name,
             },
           })
@@ -223,7 +257,10 @@ export const authRouter = router({
         // Store encrypted calendar connection tokens
         await prisma.calendarConnection.upsert({
           where: {
-            userId: user.id,
+            userId_provider: {
+              userId: user.id,
+              provider: 'google',
+            },
           },
           create: {
             userId: user.id,
