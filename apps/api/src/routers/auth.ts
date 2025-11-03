@@ -52,16 +52,27 @@ export const authRouter = router({
       }
 
       // Hash password
-      const hashedPassword = await hashPassword(input.password)
-
-      // Create user
-      const user = await prisma.user.create({
-        data: {
-          email: input.email,
-          name: input.name,
-          hashedPassword,
-        },
-      })
+      let User
+      try {
+        user = await prisma.user.create({
+          data: {
+            email: input.email,
+            name: input.name,
+            hashedPassword,
+          },
+        })
+      } catch (error) {
+        if (
+          error instanceOf Prisma.PrismaClientKnownRequestError 
+          && error.code === 'P2002'
+        ) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'User with this email already exists',
+          })
+        }
+        throw error
+      }
 
       // Create session
       const session = await lucia.createSession(user.id, {})
@@ -199,56 +210,36 @@ export const authRouter = router({
           },
         })
 
-        // Validate response status
         if (!googleUserResponse.ok) {
-          let errorMessage = 'Failed to fetch Google account details'
-
-          try {
-            const errorBody = (await googleUserResponse.json()) as {
-              error?: string
-              error_description?: string
-            }
-            errorMessage = errorBody.error_description || errorBody.error || errorMessage
-          } catch {
-            // If error body can't be parsed, use status text
-            errorMessage = `${errorMessage}: ${googleUserResponse.statusText}`
-          }
-
           throw new TRPCError({
-            code: googleUserResponse.status === 401 ? 'UNAUTHORIZED' : 'BAD_REQUEST',
-            message: errorMessage,
+            code: 'BAD_REQUEST',
+            message: 'Failed to fetch Google account details',
           })
         }
 
-        // Parse user info
         const googleUser = (await googleUserResponse.json()) as {
           id: string
-          email?: string
-          verified_email?: boolean
+          email: string
           name?: string
           picture?: string
         }
 
-        // Validate email presence and format
-        if (!googleUser.email || typeof googleUser.email !== 'string' || !googleUser.email.trim()) {
+        if (!googleUser.email) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
-            message: 'Google account does not have a valid email address',
+            message: 'Google account does not have an email',
           })
         }
 
-        // Normalize email (lowercase, trim)
-        const normalizedEmail = googleUser.email.toLowerCase().trim()
-
         // Find or create user
         let user = await prisma.user.findUnique({
-          where: { email: normalizedEmail },
+          where: { email: googleUser.email },
         })
 
         if (!user) {
           user = await prisma.user.create({
             data: {
-              email: normalizedEmail,
+              email: googleUser.email,
               name: googleUser.name,
             },
           })
