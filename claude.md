@@ -6,38 +6,28 @@ A personal time tracking tool that automatically syncs with Google Calendar and 
 ## Tech Stack
 
 ### Frontend
-- **Framework**: React 18.x with TypeScript
-- **Build Tool**: Vite
-- **Styling**: Tailwind CSS 3.x
-- **State Management**: 
-  - Zustand for global state (user, auth, UI state)
-  - TanStack Query (React Query) for server state & caching
-- **Forms**: React Hook Form + Zod validation
-- **UI Components**: Radix UI primitives
-- **Routing**: React Router v6
-- **Date Handling**: date-fns
-- **HTTP Client**: tRPC client (type-safe API calls)
+- React 18 + TypeScript + Vite
+- Tailwind CSS
+- Zustand (global state) + TanStack Query (server state)
+- React Hook Form + Zod validation
+- Radix UI components
+- React Router v6
+- tRPC client
 
 ### Backend
-- **Runtime**: Node.js 20.x LTS
-- **Framework**: Fastify (high performance, TypeScript-first)
-- **API Layer**: tRPC for end-to-end type safety
-- **Database**: PostgreSQL 16.x with Prisma ORM
-- **Caching**: Redis (via Upstash)
-- **Queue**: BullMQ for background jobs
-- **Authentication**: 
-  - Lucia Auth for session management
-  - Google OAuth 2.0 for calendar access
-- **Validation**: Zod schemas (shared between frontend/backend)
+- Node.js 20.x + Fastify
+- tRPC (end-to-end type safety)
+- PostgreSQL + Prisma ORM
+- Redis (Upstash) for caching
+- BullMQ for background jobs
+- Lucia Auth + Google OAuth 2.0
+- Zod validation
 
 ### Infrastructure
-- **Monorepo**: Turborepo
-- **Frontend Hosting**: Vercel
-- **Backend Hosting**: Railway or Fly.io
-- **Database**: Railway PostgreSQL or Supabase
-- **Redis**: Upstash Redis
-- **Monitoring**: Sentry for error tracking
-- **CI/CD**: GitHub Actions
+- Turborepo monorepo
+- Neon PostgreSQL (production)
+- Upstash Redis
+- Vercel (frontend), Railway/Fly.io (backend planned)
 
 ## Project Structure
 
@@ -69,376 +59,108 @@ auto-timesheet/
 └── package.json
 ```
 
-## Core Features Implementation
+## Core Features (MVP Scope)
 
-### 1. Authentication & Calendar Connection
-```typescript
-// OAuth flow with Google Calendar
-- Implement Lucia Auth for session management
-- Store OAuth tokens encrypted in database
-- Auto-refresh tokens before expiry
-- Request minimal scope: calendar.readonly
-```
+### 1. User Authentication
+- Email/password signup and login (Argon2 hashing)
+- Google OAuth integration with encrypted token storage (AES-256-GCM)
+- Automatic token refresh (5-minute buffer before expiry)
+- Session management with Lucia Auth
 
-### 2. Calendar Event Syncing
-```typescript
-// Background job for calendar sync
-- Use BullMQ to queue sync jobs
-- Fetch events via Google Calendar API
-- Cache results in Redis (15-minute TTL)
-- Upsert to PostgreSQL for persistence
-```
+### 2. Calendar Integration
+- List and select Google calendars to sync
+- Fetch calendar events via Google Calendar API
+- Store events with metadata (title, time, attendees)
 
-### 3. AI-Powered Categorization
-```typescript
-// Simple rule-based learning engine
-interface CategoryRule {
-  id: string;
-  userId: string;
-  ruleType: 'title_keyword' | 'attendee_email' | 'calendar_name' | 'recurring_event';
-  condition: string;
-  projectId: string;
-  confidenceScore: number;
-  accuracy: number;
-}
+### 3. Time Tracking
+- Automatic timesheet entries from calendar events
+- Manual time entry creation
+- Project categorization and assignment
+- Weekly review and approval workflow
 
-// Learning algorithm:
-1. Extract patterns from user categorizations
-2. Create/update rules based on patterns
-3. Calculate confidence scores
-4. Suggest categories for new events
-5. Learn from user corrections
-```
+### 4. AI Categorization (Rule-based)
+- Learn patterns from user categorizations
+- Suggest projects for new events based on:
+  - Title keywords
+  - Attendee emails
+  - Calendar source
+  - Recurring event patterns
+- Improve accuracy based on user corrections
 
-### 4. Database Schema
+## Database Schema
 
-```prisma
-model User {
-  id            String   @id @default(cuid())
-  email         String   @unique
-  name          String?
-  createdAt     DateTime @default(now())
-  
-  sessions      Session[]
-  projects      Project[]
-  entries       TimesheetEntry[]
-  rules         CategoryRule[]
-  calendars     CalendarConnection[]
-}
+See `packages/database/prisma/schema.prisma` for the complete schema.
 
-model Project {
-  id            String   @id @default(cuid())
-  userId        String
-  name          String
-  isArchived    Boolean  @default(false)
-  lastUsedAt    DateTime @default(now())
-  useCount      Int      @default(0)
-  
-  user          User     @relation(fields: [userId], references: [id])
-  entries       TimesheetEntry[]
-  rules         CategoryRule[]
-  
-  @@index([userId, lastUsedAt])
-}
+**Key Models:**
+- `User` - User accounts and authentication
+- `Session` - Lucia Auth sessions
+- `CalendarConnection` - OAuth tokens and selected calendars
+- `CalendarEvent` - Synced calendar events
+- `Project` - User-defined project categories
+- `TimesheetEntry` - Time entries (manual or from events)
+- `CategoryRule` - AI learning rules for auto-categorization
 
-model CalendarEvent {
-  id            String   @id @default(cuid())
-  googleEventId String
-  userId        String
-  title         String
-  startTime     DateTime
-  endTime       DateTime
-  attendees     Json?
-  isAllDay      Boolean  @default(false)
-  
-  user          User     @relation(fields: [userId], references: [id])
-  entry         TimesheetEntry?
-  
-  @@unique([userId, googleEventId])
-  @@index([userId, startTime])
-}
+## Security Implementation
 
-model TimesheetEntry {
-  id            String   @id @default(cuid())
-  userId        String
-  eventId       String?  @unique
-  projectId     String?
-  date          DateTime
-  duration      Int      // in minutes
-  isManual      Boolean  @default(false)
-  isSkipped     Boolean  @default(false)
-  notes         String?
-  
-  user          User     @relation(fields: [userId], references: [id])
-  event         CalendarEvent? @relation(fields: [eventId], references: [id])
-  project       Project? @relation(fields: [projectId], references: [id])
-  
-  @@index([userId, date])
-}
+- **OAuth Tokens**: AES-256-GCM encryption at rest with auth tags
+- **Sessions**: httpOnly, sameSite cookies (CSRF protection)
+- **Rate Limiting**: 100 requests/minute (global)
+- **Input Validation**: Zod schemas on all endpoints
+- **Password Hashing**: Argon2 (OWASP recommended)
+- **CORS**: Configured for frontend domain with credentials
 
-model CategoryRule {
-  id            String   @id @default(cuid())
-  userId        String
-  ruleType      String
-  condition     String
-  projectId     String
-  confidence    Float    @default(0.5)
-  matchCount    Int      @default(0)
-  accuracy      Float    @default(0)
-  
-  user          User     @relation(fields: [userId], references: [id])
-  project       Project  @relation(fields: [projectId], references: [id])
-  
-  @@index([userId, ruleType])
-}
-```
+## Development
 
-## API Endpoints (tRPC Procedures)
-
-```typescript
-// Auth procedures
-auth.signup
-auth.login  
-auth.logout
-auth.googleOAuth
-auth.googleCallback
-
-// Calendar procedures  
-calendar.list
-calendar.sync
-calendar.updateSettings
-
-// Event procedures
-event.getRange
-event.getSuggestions
-
-// Project procedures
-project.list
-project.create
-project.update
-project.archive
-
-// Timesheet procedures
-timesheet.getEntries
-timesheet.updateEntry
-timesheet.createManualEntry
-timesheet.skipEntry
-timesheet.bulkCategorize
-
-// Learning procedures
-learning.provideFeedback
-learning.getStats
-```
-
-## Key Implementation Details
-
-### 1. Optimistic Updates
-- Use React Query's optimistic updates for instant UI feedback
-- Rollback on server errors
-- Show subtle loading states
-
-### 2. Background Jobs
-```typescript
-// Calendar sync job (runs every 15 minutes)
-queue.add('sync-calendar', { userId }, {
-  repeat: { every: 900000 } // 15 minutes
-});
-
-// Learning feedback job
-queue.add('update-rules', { 
-  userId, 
-  eventId, 
-  selectedProjectId 
-});
-```
-
-### 3. Performance Optimizations
-- Lazy load older weeks
-- Virtual scrolling for large lists
-- Debounced auto-save (500ms)
-- Redis caching for frequently accessed data
-- Database indexes on foreign keys and date ranges
-
-### 4. Security Considerations
-- Encrypt OAuth tokens at rest
-- Use httpOnly, secure, sameSite cookies
-- Rate limiting (100 requests/minute)
-- Input validation with Zod
-- SQL injection prevention via Prisma
-- CORS configuration for production domain only
-
-## Development Workflow
-
-### Local Development Setup
+### Local Setup
 ```bash
-# Clone repository
-git clone <repo-url>
-cd auto-timesheet
-
-# Install dependencies
 pnpm install
-
-# Setup environment variables
-cp .env.example .env.local
-# Add Google OAuth credentials, database URL, etc.
-
-# Run database migrations
 pnpm db:migrate
-
-# Start development servers
-pnpm dev
+pnpm dev              # Start all services
+pnpm dev:web          # Frontend only (port 3000)
+pnpm dev:api          # Backend only (port 3001)
 ```
 
 ### Environment Variables
-```env
-# Database
-DATABASE_URL="postgresql://..."
-REDIS_URL="redis://..."
+See `.env` file. Key variables:
+- `DATABASE_URL` - Neon PostgreSQL connection
+- `REDIS_URL` - Upstash Redis (needs read-write user)
+- `SESSION_SECRET`, `ENCRYPTION_KEY` - Auto-generated
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` - OAuth credentials
+- `GOOGLE_REDIRECT_URI` - Callback URL
 
-# Auth
-SESSION_SECRET="..."
-GOOGLE_CLIENT_ID="..."
-GOOGLE_CLIENT_SECRET="..."
-GOOGLE_REDIRECT_URI="..."
-
-# Encryption
-ENCRYPTION_KEY="..."
-
-# API
-API_URL="http://localhost:3001"
-NEXT_PUBLIC_API_URL="http://localhost:3001"
-```
-
-## Testing Strategy
-
-### Unit Tests
-- Vitest for frontend components
-- Jest for backend services
-- Test coverage target: 70% for critical paths
-
-### Integration Tests
-- Test API endpoints with supertest
-- Test database operations with test database
-
-### E2E Tests (Post-MVP)
-- Playwright for critical user flows
-- Test calendar sync, categorization, and time tracking
-
-## Deployment Checklist
-
-### Pre-deployment
-- [ ] Environment variables configured
-- [ ] Database migrations run
-- [ ] Redis configured
-- [ ] Google OAuth app configured
-- [ ] CORS settings updated
-- [ ] Rate limiting configured
-
-### Monitoring Setup
-- [ ] Sentry error tracking
-- [ ] Uptime monitoring
-- [ ] Database query performance monitoring
-- [ ] API endpoint latency tracking
-
-## Performance Targets
-- Page load: < 2 seconds
-- API response: < 500ms (p95)
-- Calendar sync: < 5 seconds for 1 week
-- Suggestion accuracy: > 60% after 3 weeks
-- User retention: 3+ consecutive weeks
-
-## Success Metrics (SCL)
-- User completes first weekly review in < 5 minutes from signup
-- AI suggestion accuracy > 60% acceptance rate  
-- User returns for 3+ consecutive weeks
-- 8/10 beta users would recommend to colleague
-
-## Future Enhancements (Post-MVP)
-- Export functionality (CSV, PDF reports)
-- Team features and shared projects
-- Mobile app (React Native)
-- Integration with other calendar providers
-- Advanced AI using ML models
-- Webhook integrations with timesheet systems
-- Multi-language support
-
-## Common Commands
-
+### Database Commands
 ```bash
-# Development
-pnpm dev              # Start all services
-pnpm dev:web          # Start frontend only
-pnpm dev:api          # Start backend only
-
-# Database
 pnpm db:push          # Push schema changes
 pnpm db:migrate       # Run migrations
 pnpm db:studio        # Open Prisma Studio
-
-# Testing
-pnpm test             # Run all tests
-pnpm test:unit        # Run unit tests
-pnpm test:e2e         # Run E2E tests
-
-# Building
-pnpm build            # Build all packages
-pnpm build:web        # Build frontend
-pnpm build:api        # Build backend
-
-# Deployment
-pnpm deploy:staging   # Deploy to staging
-pnpm deploy:prod      # Deploy to production
 ```
+
+## Success Metrics (MVP)
+- User completes first weekly review in < 5 minutes
+- AI suggestion accuracy > 60% after 3 weeks
+- 3+ weeks user retention
+- 8/10 beta users recommend to colleague
+
 
 ## Architecture Decisions
 
-### Why Fastify over Express?
-- 2x faster performance
-- Built-in TypeScript support
-- Schema-based validation
-- Better plugin ecosystem
+- **Fastify** over Express: 2x faster, TypeScript-first, schema validation
+- **tRPC**: End-to-end type safety, no API docs needed, perfect for monorepos
+- **Zustand**: Less boilerplate than Context API, better performance
+- **BullMQ**: Redis-based reliability, job scheduling, perfect for calendar sync
+- **Lucia Auth**: Modern, type-safe, flexible session management, OAuth support
+- **Argon2**: OWASP recommended over bcrypt
+- **AES-256-GCM**: Authenticated encryption prevents token tampering
 
-### Why tRPC?
-- End-to-end type safety
-- No API documentation needed
-- Automatic client generation
-- Perfect for TypeScript monorepos
+## Philosophy
 
-### Why Zustand over Context API?
-- Less boilerplate
-- Better performance (no unnecessary re-renders)
-- DevTools support
-- Simpler async actions
+**SCL (Simple, Complete, Lovable)**: Build something simple that works completely and that users will love.
 
-### Why BullMQ for background jobs?
-- Redis-based reliability
-- Job retries and scheduling
-- Dashboard for monitoring
-- Handles calendar sync perfectly
-
-### Why Lucia Auth?
-- Modern, type-safe authentication
-- Built for TypeScript
-- Flexible session management
-- Works great with OAuth
-
-## Getting Help
-
-- Review the PRD for detailed requirements
-- Check the database schema for data relationships
-- Use the tRPC procedures as your API guide
-- Follow the SCL principle: Simple, Complete, Lovable
-- Prioritize user experience over features
-
-## Important Notes
-
-1. **Start with the MVP**: Focus on core calendar sync and categorization first
-2. **Keep it simple**: No exports, no team features for initial release
-3. **Make it fast**: Users should complete weekly review in < 5 minutes
-4. **AI learning**: Simple rule-based system is sufficient for MVP
-5. **User-first**: Every decision should reduce friction for the user
-
-This project follows the SCL (Simple, Complete, Lovable) philosophy - build something simple that works completely and that users will love.
+- Focus on core MVP: calendar sync + AI categorization
+- No exports, team features, or complex reporting in v1
+- Users should complete weekly review in < 5 minutes
+- Simple rule-based AI is sufficient for MVP
+- Minimize friction at every step
 
 ---
 
@@ -476,195 +198,175 @@ When completing work on this project:
 
 ## Current Status
 
-### Completed
+### ✅ Completed
 
-#### Infrastructure & Setup
-- [x] Basic project structure created
-- [x] Turborepo monorepo setup
-- [x] Frontend app scaffolding (React + Vite + Tailwind)
-- [x] Backend API scaffolding (Fastify + tRPC)
-- [x] Shared packages structure (database, shared, config)
-- [x] Environment variables configured (.env with encryption keys and secrets)
-- [x] Rate limiting middleware (100 requests/minute)
+**Infrastructure**
 
-#### Database
-- [x] Prisma database schema defined with all models
-- [x] Added selectedCalendarIds field to CalendarConnection model
-- [x] Proper indexes and relationships configured
-- [x] Cascade deletes configured for data integrity
+- Turborepo monorepo with pnpm workspaces
+- Database: Neon PostgreSQL (deployed, migrated)
+- Schema: All 7 models defined and indexed
+- Environment: OAuth, encryption keys, Redis configured
 
-#### Epic 1: User Onboarding (Backend - 95% Complete)
-- [x] **Authentication System**
-  - [x] Email/password signup with Argon2 password hashing
-  - [x] Email/password login
-  - [x] Logout functionality
-  - [x] Session management with Lucia Auth
-  - [x] Secure session cookies (httpOnly, sameSite, secure in production)
-  - [x] Email normalization (case-insensitive)
+**Backend - Authentication (Epic 1)**
 
-- [x] **Google OAuth Integration**
-  - [x] OAuth flow with PKCE (Arctic library)
-  - [x] Authorization URL generation with state and code verifier
-  - [x] OAuth callback handling with token exchange
-  - [x] User creation/linking via Google account
-  - [x] Encrypted token storage (AES-256-GCM)
-  - [x] OAuth scope: calendar.readonly
+- Email/password signup and login (Argon2)
+- Google OAuth with PKCE flow (Arctic)
+- Session management (Lucia Auth)
+- Token encryption (AES-256-GCM) and auto-refresh
+- Rate limiting (100 req/min global)
+- Security: httpOnly/sameSite cookies, CSRF protection
 
-- [x] **Token Management**
-  - [x] OAuth token encryption at rest
-  - [x] Automatic token refresh service
-  - [x] Token expiry detection (5-minute buffer)
-  - [x] Refresh token rotation
-  - [x] Batch token refresh for scheduled jobs
+**Backend - Calendar Integration**
 
-- [x] **Calendar Selection API**
-  - [x] List available Google calendars
-  - [x] Get calendar connection status
-  - [x] Update selected calendars for syncing
-  - [x] Calendar ID validation (prevents invalid selections)
-  - [x] Multi-calendar support
+- List Google calendars with pagination
+- Calendar selection and validation
+- Status endpoint for connection checking
+- Google Calendar service (fetch events)
 
-- [x] **Security Enhancements**
-  - [x] CSRF protection (sameSite cookies)
-  - [x] XSS protection (httpOnly cookies)
-  - [x] Rate limiting middleware
-  - [x] Input validation with Zod schemas
-  - [x] SQL injection protection (Prisma ORM)
-  - [x] Encrypted OAuth tokens with auth tags
-  - [x] CORS configuration with credentials support
+**Shared Packages**
 
-#### API Endpoints Implemented
+- Zod schemas for validation
+- Config constants (API, calendar, AI settings)
+- Utility functions (duration formatting, date ranges)
 
-##### Auth Router (`/trpc/auth.*`)
-- `auth.status` - Get current authentication status
-- `auth.signup` - Email/password registration
-- `auth.login` - Email/password authentication
-- `auth.logout` - Invalidate session
-- `auth.googleOAuth` - Initiate Google OAuth flow
-- `auth.googleCallback` - Handle OAuth redirect and create session
+### ✅ OAuth Token Issue Resolution (2025-11-05)
 
-##### Calendar Router (`/trpc/calendar.*`)
-- `calendar.status` - Get connection status and selected calendars
-- `calendar.list` - List all available Google calendars
-- `calendar.updateSelection` - Update selected calendars for syncing
-- `calendar.sync` - Trigger manual sync (stub for future implementation)
+**Fixed: Enhanced Error Handling & Diagnostics**
 
-### In Progress
-- [ ] Frontend authentication pages (signup, login, OAuth redirect)
-- [ ] Database setup and migrations (requires PostgreSQL instance)
-- [ ] Calendar sync background jobs with BullMQ
-- [ ] Redis configuration for caching
+Previously reported syntax errors in claude.md have been resolved. The following improvements were made to address OAuth token issues:
 
-### Blocked/Requires Setup
-- [ ] Database migrations (needs DATABASE_URL configured)
-- [ ] Google OAuth app setup (needs Client ID and Secret from Google Cloud Console)
-- [ ] PostgreSQL database instance (local or hosted)
-- [ ] Redis instance (local or Upstash)
+1. **Improved OAuth Callback Error Handling** (`apps/api/src/routers/auth.ts`)
+   - ✅ Added detailed error logging with Google API response bodies
+   - ✅ Separate try-catch for token encryption to catch ENCRYPTION_KEY issues
+   - ✅ Parse Arctic/OAuth-specific errors (invalid_grant, PKCE failures)
+   - ✅ Preserve TRPCError types for proper client-side handling
 
-### Not Started
-- [ ] Project management features
-- [ ] Timesheet entry system
-- [ ] AI categorization engine
-- [ ] Frontend UI implementation
+2. **Enhanced Token Refresh Logic** (`apps/api/src/auth/token-refresh.ts`)
+   - ✅ Parse refresh errors to identify: revoked tokens, invalid credentials, network issues
+   - ✅ Separate decryption errors from refresh errors with clear error codes
+   - ✅ Added detailed console logging for debugging token issues
+   - ✅ Error messages now include actionable guidance (e.g., "User needs to re-authenticate")
 
-### Next Steps
+3. **Better Google Calendar API Error Handling** (`apps/api/src/services/google-calendar.ts`)
+   - ✅ Parse Google API error responses to extract detailed error messages
+   - ✅ Distinguish between 401 (invalid token), 403 (permissions), 404 (not found), 429 (rate limit)
+   - ✅ Handle request timeouts with AbortSignal
+   - ✅ Provide specific guidance based on error type
 
-#### Immediate (Required for Testing)
-1. Set up PostgreSQL database (local or Railway/Supabase)
-2. Update DATABASE_URL in .env
-3. Run database migrations: `pnpm db:migrate`
-4. Set up Google OAuth app in Google Cloud Console
-5. Update GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env
-6. Test authentication flow end-to-end
+4. **OAuth Diagnostic Tool** (`apps/api/oauth-diagnostic-tool.ts`)
+   - ✅ Created comprehensive diagnostic CLI tool to check:
+     - Environment variables configuration
+     - Database connectivity
+     - Google OAuth credentials format
+     - User calendar connections and token status
+     - Token encryption/decryption functionality
+     - Token expiry status
+   - Usage: `npx tsx apps/api/oauth-diagnostic-tool.ts [userId]`
 
-#### Short Term (Next Sprint)
-1. Build frontend authentication pages
-2. Implement calendar sync service with BullMQ
-3. Set up Redis for caching
-4. Add session cleanup job
-5. Implement stricter rate limiting on auth endpoints
-6. Add password strength validation
+**Remaining Environment Issues**:
 
-#### Medium Term
-1. Implement project management API
-2. Build timesheet entry system
-3. Create AI categorization engine
-4. Build frontend timesheet UI
-5. Implement background sync jobs
+- Redis using read-only user (needs read-write credentials for BullMQ)
+
+### 🚧 Stubs Only (Not Implemented)
+
+- `calendar.sync` - Returns placeholder, no actual sync
+- `project.*` - Only empty list endpoint exists
+- `timesheet.*` - Only empty getEntries exists
+- Background jobs - BullMQ configured but no jobs created
+- Redis caching - Not used anywhere yet
+
+### ❌ Not Started
+
+**Backend**
+
+- Calendar event syncing (background jobs)
+- Project CRUD operations
+- Timesheet entry management
+- AI categorization engine
+- Session cleanup jobs
+- Structured logging (currently console.log)
+
+**Frontend**
+
+- All UI pages (0% implemented, only scaffold exists)
+- Authentication pages
+- Calendar selection UI
+- Timesheet views
+- Project management
+- Any React Router routes
+- Any Zustand stores
+
+**Testing & Deployment**
+
+- No tests exist (0% coverage)
+- No CI/CD pipelines
+- No monitoring/error tracking
+
+### Next Priorities
+
+**Immediate** (Critical for Testing):
+
+1. Test OAuth flow end-to-end with a real Google account
+2. Update Redis to use read-write credentials for BullMQ
+3. Verify calendar sync functionality works correctly
+
+**Short Term** (Core MVP):
+
+1. Build frontend authentication flow
+2. Implement calendar sync with BullMQ
+3. Create project management API + UI
+4. Build timesheet entry system
+5. Implement basic AI categorization
+
+**Medium Term** (Polish):
+
+1. Add comprehensive logging
+2. Session cleanup job
+3. Stricter rate limiting per endpoint
+4. Password strength validation
+5. Write tests for critical paths
 
 ---
 
-## Technical Decisions & Notes
+## Technical Notes
 
-### Session 1 - Epic 1 Implementation (2024-01-XX)
+### Implementation Details
 
-#### Architecture Decisions
-1. **Lucia Auth over Passport.js**: Chosen for TypeScript-first design and simpler API
-2. **Arctic over manual OAuth**: Provides PKCE flow out of the box with type safety
-3. **Argon2 over bcrypt**: OWASP recommended, better security parameters
-4. **AES-256-GCM over AES-256-CBC**: Authenticated encryption prevents tampering
-5. **JSON field for calendar IDs**: Simpler than separate table for MVP
+**Authentication**
 
-#### Security Enhancements Applied
-- Session cookies use `sameSite: 'lax'` for CSRF protection
-- OAuth state cookies also use `sameSite: 'lax'`
-- Email addresses normalized to lowercase to prevent duplicate accounts
-- Calendar ID validation prevents users from selecting calendars they don't own
-- All string inputs trimmed before storage
-- Generic error messages to prevent information disclosure
+- Email normalization (lowercase) prevents duplicate accounts
+- Session cookies: `sameSite: 'lax'` for CSRF protection
+- OAuth state cookies: `sameSite: 'lax'` with 10-minute expiry
+- Generic error messages prevent information disclosure
+- Calendar ID validation prevents unauthorized access
 
-#### Known Issues to Address
-1. **Rate Limiting**: Currently global only, should add endpoint-specific limits for auth
-2. **Password Strength**: Only checks minimum length, should add complexity requirements
-3. **Token Refresh Race Condition**: Multiple simultaneous requests could trigger duplicate refreshes
-4. **Console Logging**: Should replace with structured logger (Pino/Winston)
-5. **Session Cleanup**: No automated cleanup of expired sessions yet
-6. **Database Transactions**: User creation and session creation not wrapped in transaction
+**Database**
 
-#### Database Schema Updates
-- Added `selectedCalendarIds` JSON field to `CalendarConnection` model
-- Schema supports nullable `expiresAt` for tokens
-- Proper cascade deletes configured for all relationships
+- `selectedCalendarIds` stored as JSON (simpler than separate table)
+- Nullable `expiresAt` for long-lived tokens
+- CASCADE deletes maintain referential integrity
+- Indexes on userId, date ranges, and foreign keys
 
-#### Environment Variables Required
-```
-DATABASE_URL="postgresql://..."          # PostgreSQL connection
-REDIS_URL="redis://..."                  # Redis for caching
-SESSION_SECRET="<64-char-hex>"           # Generated automatically
-ENCRYPTION_KEY="<64-char-hex>"           # Generated automatically
-GOOGLE_CLIENT_ID="<from-google>"         # Needs manual setup
-GOOGLE_CLIENT_SECRET="<from-google>"     # Needs manual setup
-GOOGLE_REDIRECT_URI="http://localhost:3001/auth/google/callback"
-PORT=3001
-NODE_ENV="development"
-FRONTEND_URL="http://localhost:3000"
-```
+**Security Gaps to Address**
 
-#### Files Created/Modified
-**Created:**
-- `apps/api/src/auth/token-refresh.ts` - OAuth token refresh service
-- `apps/api/src/services/google-calendar.ts` - Google Calendar API integration
-- `.env` - Environment variables with generated keys
+- Rate limiting: Global only, needs endpoint-specific limits
+- Password strength: Only checks minimum length
+- Token refresh: Potential race condition with simultaneous requests
+- Logging: Using console.log instead of structured logger
+- Sessions: No automated cleanup job
+- Transactions: User/session creation not atomic
 
-**Modified:**
-- `apps/api/src/routers/auth.ts` - Full authentication implementation
-- `apps/api/src/routers/calendar.ts` - Calendar selection API
-- `apps/api/src/auth/lucia.ts` - Added sameSite cookie attribute
-- `apps/api/src/index.ts` - Added rate limiting middleware
-- `packages/database/prisma/schema.prisma` - Added selectedCalendarIds field
+### Key Files
 
-#### Code Quality Notes
-- TypeScript compilation successful with no errors
-- All functions properly typed
-- Input validation with Zod schemas
-- Error handling with tRPC error codes
-- Comments and JSDoc for complex functions
+**Backend**
 
-#### Production Readiness: 75%
-**Blockers for Production:**
-- Need to set up PostgreSQL database
-- Need to configure Google OAuth app
-- Should add stricter rate limiting
-- Should implement session cleanup job
-- Should add comprehensive logging
-- Need frontend implementation
+- `apps/api/src/routers/auth.ts` - Authentication endpoints
+- `apps/api/src/routers/calendar.ts` - Calendar API
+- `apps/api/src/auth/token-refresh.ts` - Token refresh service
+- `apps/api/src/services/google-calendar.ts` - Google Calendar integration
+- `packages/database/prisma/schema.prisma` - Database schema
+
+**Configuration**
+
+- `.env` - All environment variables
+- `packages/config/index.ts` - App constants
