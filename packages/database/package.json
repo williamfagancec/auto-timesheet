@@ -2,8 +2,12 @@
   "name": "database",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "main": "./index.ts",
   "types": "./index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
   "scripts": {
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",

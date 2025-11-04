@@ -5,6 +5,8 @@ import rateLimit from '@fastify/rate-limit'
 import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify'
 import { appRouter } from './routers/index.js'
 import { createContext } from './context.js'
+import { initializeCalendarSyncJobs, shutdownCalendarSyncJobs } from './jobs/calendar-sync-job.js'
+import { getOAuthState } from './auth/oauth-state-store.js'
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001
 const HOST = process.env.HOST || '0.0.0.0'
@@ -49,11 +51,165 @@ server.get('/health', async () => {
   return { status: 'ok', timestamp: new Date().toISOString() }
 })
 
+// Google OAuth callback endpoint - handles the full OAuth flow
+server.get('/auth/google/callback', async (request, reply) => {
+  const { code, state } = request.query as { code?: string; state?: string }
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000'
+
+  console.log('[OAuth Callback] Received callback:', { code: code?.substring(0, 20) + '...', state })
+
+  if (!code || !state) {
+    console.error('[OAuth Callback] Missing code or state')
+    return reply.redirect(`${frontendUrl}/login?error=missing_oauth_params`)
+  }
+
+  try {
+    // Get stored state and code verifier from in-memory store
+    const storedOAuth = getOAuthState(state)
+
+    if (!storedOAuth) {
+      console.error('[OAuth Callback] OAuth state validation failed: state not found or expired')
+      return reply.redirect(`${frontendUrl}/login?error=invalid_oauth_state`)
+    }
+
+    console.log('[OAuth Callback] OAuth state validated successfully')
+
+    // Exchange code for tokens
+    const { google } = await import('./auth/google.js')
+    const { encrypt } = await import('./auth/encryption.js')
+    const { lucia } = await import('./auth/lucia.js')
+    const { prisma } = await import('database')
+
+    const tokens = await google.validateAuthorizationCode(code, storedOAuth.codeVerifier)
+
+    // Fetch user info from Google
+    const googleUserResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: {
+        Authorization: `Bearer ${tokens.accessToken()}`,
+      },
+    })
+
+    if (!googleUserResponse.ok) {
+      console.error('[OAuth Callback] Failed to fetch Google user info:', googleUserResponse.status)
+      return reply.redirect(`${frontendUrl}/login?error=oauth_failed`)
+    }
+
+    const googleUser = (await googleUserResponse.json()) as {
+      id: string
+      email: string
+      name?: string
+      picture?: string
+    }
+
+    if (!googleUser.email) {
+      console.error('[OAuth Callback] No email in Google user info')
+      return reply.redirect(`${frontendUrl}/login?error=oauth_failed`)
+    }
+
+    // Find or create user
+    let user = await prisma.user.findUnique({
+      where: { email: googleUser.email },
+    })
+
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          email: googleUser.email,
+          name: googleUser.name,
+        },
+      })
+    }
+
+    // Handle refresh token (Google only returns it on first authorization or if prompt=consent)
+    let encryptedRefreshToken: string | null = null
+    try {
+      const refreshToken = tokens.refreshToken()
+      if (refreshToken) {
+        encryptedRefreshToken = encrypt(refreshToken)
+      }
+    } catch (error) {
+      // No refresh token provided by Google (not the first authorization)
+      console.log('[OAuth Callback] No refresh token provided by Google (this is normal for subsequent authorizations)')
+    }
+
+    // Store encrypted calendar connection tokens
+    await prisma.calendarConnection.upsert({
+      where: {
+        userId_provider: {
+          userId: user.id,
+          provider: 'google',
+        },
+      },
+      create: {
+        userId: user.id,
+        provider: 'google',
+        accessToken: encrypt(tokens.accessToken()),
+        refreshToken: encryptedRefreshToken,
+        expiresAt: tokens.accessTokenExpiresAt(),
+      },
+      update: {
+        accessToken: encrypt(tokens.accessToken()),
+        // Only update refresh token if we got a new one
+        ...(encryptedRefreshToken ? { refreshToken: encryptedRefreshToken } : {}),
+        expiresAt: tokens.accessTokenExpiresAt(),
+      },
+    })
+
+    // Create session
+    const session = await lucia.createSession(user.id, {})
+    const sessionCookie = lucia.createSessionCookie(session.id)
+    reply.setCookie(sessionCookie.name, sessionCookie.value, sessionCookie.attributes)
+
+    console.log('[OAuth Callback] Session created:', {
+      user: user.email,
+      sessionId: session.id.substring(0, 20) + '...',
+      cookieName: sessionCookie.name,
+      cookieAttributes: sessionCookie.attributes,
+    })
+
+    console.log(`[OAuth Callback] Successfully authenticated user ${user.email}`)
+
+    // Redirect to the events page on success
+    return reply.redirect(`${frontendUrl}/events`)
+  } catch (error) {
+    console.error('[OAuth Callback Error]', error)
+    return reply.redirect(`${frontendUrl}/login?error=oauth_failed`)
+  }
+})
+
 // Start server
 try {
   await server.listen({ port: PORT, host: HOST })
   console.log(`Server listening on http://${HOST}:${PORT}`)
+
+  // Initialize background jobs
+  if (process.env.NODE_ENV !== 'test') {
+    await initializeCalendarSyncJobs()
+    console.log('Background jobs initialized')
+  }
 } catch (err) {
   server.log.error(err)
   process.exit(1)
 }
+
+// Graceful shutdown
+const signals = ['SIGINT', 'SIGTERM']
+signals.forEach((signal) => {
+  process.on(signal, async () => {
+    console.log(`\nReceived ${signal}, shutting down gracefully...`)
+
+    try {
+      // Shutdown background jobs
+      await shutdownCalendarSyncJobs()
+
+      // Close server
+      await server.close()
+
+      console.log('Shutdown complete')
+      process.exit(0)
+    } catch (err) {
+      console.error('Error during shutdown:', err)
+      process.exit(1)
+    }
+  })
+})

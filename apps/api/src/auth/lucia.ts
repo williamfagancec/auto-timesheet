@@ -9,8 +9,11 @@ const adapter = new PrismaAdapter(prisma.session, prisma.user);
 export const lucia = new Lucia(adapter, {
   sessionCookie: {
     attributes: {
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax", // CSRF protection (httpOnly is true by default in Lucia)
+      // For localhost development with different ports (3000 and 3001), we need sameSite: 'none'
+      // to allow cookies to be sent in cross-origin requests. This requires secure: true,
+      // but modern browsers allow secure cookies on localhost even without HTTPS.
+      secure: true, // Always true (works on localhost and required for sameSite: 'none')
+      sameSite: "none", // Allow cross-origin requests between localhost:3000 and localhost:3001
     },
   },
   getUserAttributes: (attributes) => {

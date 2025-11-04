@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { prisma } from 'database'
 import { TRPCError } from '@trpc/server'
 import { listGoogleCalendars } from '../services/google-calendar.js'
+import { syncUserEvents } from '../services/calendar-sync.js'
 
 export const calendarRouter = router({
   /**
@@ -132,12 +133,86 @@ export const calendarRouter = router({
   /**
    * Trigger manual calendar sync
    */
-  sync: protectedProcedure.mutation(async () => {
-    // TODO: Implement calendar sync logic with BullMQ
-    // This will be implemented in the calendar sync feature
-    return {
-      success: true,
-      message: 'Sync initiated (to be implemented)',
+  sync: protectedProcedure.mutation(async ({ ctx }) => {
+    try {
+      const result = await syncUserEvents(ctx.user.id)
+
+      return {
+        success: true,
+        ...result,
+      }
+    } catch (error) {
+      console.error('Calendar sync failed:', error)
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: error instanceof Error ? error.message : 'Failed to sync calendar events',
+      })
     }
   }),
+
+  /**
+   * Get events for a specific date range
+   */
+  getEvents: protectedProcedure
+    .input(
+      z.object({
+        startDate: z.string().datetime(),
+        endDate: z.string().datetime(),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const events = await prisma.calendarEvent.findMany({
+        where: {
+          userId: ctx.user.id,
+          isDeleted: false,
+          startTime: {
+            gte: new Date(input.startDate),
+          },
+          endTime: {
+            lte: new Date(input.endDate),
+          },
+        },
+        orderBy: {
+          startTime: 'asc',
+        },
+      })
+
+      return { events }
+    }),
+
+  /**
+   * Soft delete (hide) an event from timesheet
+   */
+  hideEvent: protectedProcedure
+    .input(
+      z.object({
+        eventId: z.string(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const event = await prisma.calendarEvent.findUnique({
+        where: { id: input.eventId },
+      })
+
+      if (!event) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Event not found',
+        })
+      }
+
+      if (event.userId !== ctx.user.id) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'You do not have permission to modify this event',
+        })
+      }
+
+      await prisma.calendarEvent.update({
+        where: { id: input.eventId },
+        data: { isDeleted: true },
+      })
+
+      return { success: true }
+    }),
 })

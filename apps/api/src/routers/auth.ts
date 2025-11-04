@@ -8,6 +8,7 @@ import { hashPassword, verifyPassword } from '../auth/password.js'
 import { google, GOOGLE_SCOPES } from '../auth/google.js'
 import { encrypt } from '../auth/encryption.js'
 import { generateCodeVerifier, generateState } from 'arctic'
+import { storeOAuthState } from '../auth/oauth-state-store.js'
 
 export const authRouter = router({
   /**
@@ -152,7 +153,7 @@ export const authRouter = router({
 
   /**
    * Initiate Google OAuth flow
-   * Returns authorization URL and stores state/code verifier in cookies
+   * Returns authorization URL and stores state/code verifier in memory
    */
   googleOAuth: publicProcedure.mutation(async ({ ctx }) => {
     const state = generateState()
@@ -160,24 +161,12 @@ export const authRouter = router({
 
     const url = google.createAuthorizationURL(state, codeVerifier, GOOGLE_SCOPES)
 
-    console.log('[OAuth Debug] Setting cookies:', { state, codeVerifier })
+    // Force Google to always return a refresh token
+    url.searchParams.set('access_type', 'offline')
+    url.searchParams.set('prompt', 'consent')
 
-    // Store state and code verifier in cookies for verification
-    ctx.res.setCookie('google_oauth_state', state, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 10, // 10 minutes
-      path: '/',
-    })
-
-    ctx.res.setCookie('google_code_verifier', codeVerifier, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 10, // 10 minutes
-      path: '/',
-    })
+    // Store state and code verifier in memory (avoids cookie issues with cross-site redirects)
+    storeOAuthState(state, codeVerifier)
 
     return { url: url.toString() }
   }),
