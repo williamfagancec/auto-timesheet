@@ -16,7 +16,8 @@ function App() {
     trpc.createClient({
       links: [
         httpBatchLink({
-          url: 'http://localhost:3001/trpc',
+          // Use relative URL to leverage Vite proxy - avoids cross-origin cookie issues
+          url: '/trpc',
           credentials: 'include',
         }),
       ],
