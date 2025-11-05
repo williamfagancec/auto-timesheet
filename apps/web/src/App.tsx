@@ -7,6 +7,8 @@ import { Login } from './pages/Login'
 import { Signup } from './pages/Signup'
 import { AuthCallback } from './pages/AuthCallback'
 import { Events } from './pages/Events'
+import { Timesheet } from './pages/Timesheet'
+import { Projects } from './pages/Projects'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { Layout } from './components/Layout'
 
@@ -18,7 +20,6 @@ function App() {
         httpBatchLink({
           // Use relative URL to leverage Vite proxy - avoids cross-origin cookie issues
           url: '/trpc',
-          credentials: 'include',
         }),
       ],
     })
@@ -44,7 +45,29 @@ function App() {
               }
             />
 
-            <Route path="/" element={<Navigate to="/events" replace />} />
+            <Route
+              path="/timesheet"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <Timesheet />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/projects"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <Projects />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route path="/" element={<Navigate to="/timesheet" replace />} />
           </Routes>
         </BrowserRouter>
       </QueryClientProvider>

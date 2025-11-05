@@ -44,6 +44,11 @@ export function DateRangeSelector({ selectedRange, onRangeChange }: DateRangeSel
     const endDate = new Date(customEnd)
     endDate.setHours(23, 59, 59, 999)
 
+    if (endDate < startDate) {
+      alert('End date must be after or equal to start date')
+      return
+    }
+
     onRangeChange({ startDate, endDate })
     setShowCustomPicker(false)
   }

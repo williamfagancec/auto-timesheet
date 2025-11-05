@@ -35,7 +35,7 @@ export async function listGoogleCalendars(userId: string): Promise<GoogleCalenda
       // Try to get detailed error from Google API
       let errorDetails = response.statusText
       try {
-        const errorBody = await response.json()
+        const errorBody = await response.json() as { error?: { message?: string } }
         if (errorBody.error && errorBody.error.message) {
           errorDetails = errorBody.error.message
         }
@@ -121,7 +121,7 @@ export async function fetchCalendarEvents(
       // Try to get detailed error from Google API
       let errorDetails = response.statusText
       try {
-        const errorBody = await response.json()
+        const errorBody = await response.json() as { error?: { message?: string } }
         if (errorBody.error && errorBody.error.message) {
           errorDetails = errorBody.error.message
         }

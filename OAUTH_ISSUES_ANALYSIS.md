@@ -89,11 +89,11 @@ if (!response.ok) {
 
 ### High Priority
 1. ✅ Improve error handling in OAuth callback with detailed error types
-2. ✅ Add better error messages in token refresh with actionable guidance
+2. ⚠️ Add better error messages in token refresh with actionable guidance (refresh token rotation missing)
 3. ✅ Parse Google API error responses properly
 
 ### Medium Priority
-4. ✅ Add token validation after refresh
+4. ⚠️ Add token validation after refresh (no validation after refresh)
 5. ⚠️ Implement mutex for token refresh (prevents race conditions)
 6. ⚠️ Add retry logic for transient failures
 

@@ -44,34 +44,55 @@ export const calendarSyncQueue = new Queue('calendar-sync', {
 export const calendarSyncWorker = new Worker(
   'calendar-sync',
   async (job) => {
-    const { userId } = job.data
+    switch (job.name) {
+      case 'sync-user': {
+        const { userId } = job.data as { userId: string }
 
-    console.log(`[CalendarSyncJob] Starting sync for user ${userId}`)
+        console.log(`[CalendarSyncJob] Starting sync for user ${userId}`)
 
-    try {
-      const result = await syncUserEvents(userId)
+        try {
+          const result = await syncUserEvents(userId)
+          
+          console.log(`[CalendarSyncJob] Completed sync for user ${userId}:`, result)
 
-      console.log(`[CalendarSyncJob] Completed sync for user ${userId}:`, result)
-
-      return result
-    } catch (error) {
-      console.error(`[CalendarSyncJob] Failed to sync for user ${userId}:`, error)
-      throw error
+          return result
+        } catch (error) {
+          console.error(`[CalendarSyncJob] Failed to sync for user ${userId}:`, error)
+          throw error
+        }
+      }
+      case 'sync-all-active-users': {
+        console.log('[CalendarSyncJob] Running recurring sync for all activite users')
+        const count = await scheduleActiveUserSyncs()
+        return { scheduledUsers: count }
+      }
+      default: {
+        console.warn(`[CalendarSyncJob] Ignoring unknown job name: ${job.name}`)
+        return
+      }
     }
   },
   {
     connection: redisConnection,
-    concurrency: 5, // Process 5 users concurrently
+    concurrency: 5, // Process up to 5 sync-user jobs concurrently
   }
 )
 
 // Log worker events
-calendarSyncWorker.on('completed', (job) => {
-  console.log(`[CalendarSyncJob] Job ${job.id} completed for user ${job.data.userId}`)
+calendarSyncWorker.on('completed', (job, result) => {
+  if (job.name === 'sync-user') {
+    console.log(`[CalendarSyncJob] Job ${job.id} completed for user ${job.data.userId}:`, result)
+  } else {
+    console.log(`[CalendarSyncJob] Job ${job.id} completed:`, result)
+  }
 })
 
 calendarSyncWorker.on('failed', (job, error) => {
-  console.error(`[CalendarSyncJob] Job ${job?.id} failed for user ${job?.data?.userId}:`, error)
+  if (job?.name === 'sync-user') {
+    console.log(`[CalendarSyncJob] Job ${job.id} failed for user ${job.data?.userId}:`, error)
+  } else {
+    console.error(`[CalendarSyncJob] Job ${job?.id} failed:`, error)
+  }
 })
 
 /**
@@ -114,7 +135,7 @@ export async function scheduleActiveUserSyncs(): Promise<number> {
       'sync-user',
       { userId: user.id },
       {
-        jobId: `sync-${user.id}-${Date.now()}`, // Unique job ID prevents duplicates
+        jobId: `sync-${user.id}`, 
       }
     )
   }
@@ -145,22 +166,6 @@ export async function setupRecurringSync() {
   console.log('[CalendarSyncJob] Recurring sync job scheduled (every 15 minutes)')
 }
 
-/**
- * Worker to handle the recurring "sync all" job
- */
-export const recurringJobWorker = new Worker(
-  'calendar-sync',
-  async (job) => {
-    if (job.name === 'sync-all-active-users') {
-      console.log('[CalendarSyncJob] Running recurring sync for all active users')
-      const count = await scheduleActiveUserSyncs()
-      return { scheduledUsers: count }
-    }
-  },
-  {
-    connection: redisConnection,
-  }
-)
 
 /**
  * Initialize the calendar sync job system
@@ -183,7 +188,6 @@ export async function initializeCalendarSyncJobs() {
 export async function shutdownCalendarSyncJobs() {
   console.log('[CalendarSyncJob] Shutting down workers...')
   await calendarSyncWorker.close()
-  await recurringJobWorker.close()
   await calendarSyncQueue.close()
   console.log('[CalendarSyncJob] Workers shut down')
 }
