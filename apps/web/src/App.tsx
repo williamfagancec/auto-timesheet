@@ -1,8 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { BrowserRouter } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { trpc } from './lib/trpc'
 import { useState } from 'react'
 import { httpBatchLink } from '@trpc/client'
+import { Login } from './pages/Login'
+import { Signup } from './pages/Signup'
+import { AuthCallback } from './pages/AuthCallback'
+import { Events } from './pages/Events'
+import { ProtectedRoute } from './components/ProtectedRoute'
+import { Layout } from './components/Layout'
 
 function App() {
   const [queryClient] = useState(() => new QueryClient())
@@ -10,7 +16,8 @@ function App() {
     trpc.createClient({
       links: [
         httpBatchLink({
-          url: 'http://localhost:3001/trpc',
+          // Use relative URL to leverage Vite proxy - avoids cross-origin cookie issues
+          url: '/trpc',
           credentials: 'include',
         }),
       ],
@@ -21,14 +28,24 @@ function App() {
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <div className="min-h-screen bg-background">
-            <h1 className="text-4xl font-bold text-center p-8">
-              Auto Timesheet
-            </h1>
-            <p className="text-center text-muted-foreground">
-              Time tracking app - Basic structure ready
-            </p>
-          </div>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
+
+            <Route
+              path="/events"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <Events />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route path="/" element={<Navigate to="/events" replace />} />
+          </Routes>
         </BrowserRouter>
       </QueryClientProvider>
     </trpc.Provider>

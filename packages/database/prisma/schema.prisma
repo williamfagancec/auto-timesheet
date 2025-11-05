@@ -37,17 +37,19 @@ model Session {
 }
 
 model CalendarConnection {
-  id           String   @id @default(cuid())
-  userId       String
-  provider     String   @default("google")
-  accessToken  String
-  refreshToken String?
-  expiresAt    DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  userId              String
+  provider            String   @default("google")
+  accessToken         String
+  refreshToken        String?
+  expiresAt           DateTime?
+  selectedCalendarIds Json?    // Array of calendar IDs to sync
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, provider])
   @@index([userId])
 }
 
@@ -71,19 +73,25 @@ model CalendarEvent {
   id            String   @id @default(cuid())
   googleEventId String
   userId        String
+  calendarId    String   // Google Calendar ID this event belongs to
   title         String
   startTime     DateTime
   endTime       DateTime
   attendees     Json?
+  location      String?
+  status        String   @default("confirmed") // confirmed, tentative, cancelled
   isAllDay      Boolean  @default(false)
+  splitIndex    Int      @default(0) // 0 for non-split events, 1,2,3... for multi-day splits
+  isDeleted     Boolean  @default(false) // Soft delete flag
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   entry TimesheetEntry?
 
-  @@unique([userId, googleEventId])
+  @@unique([userId, googleEventId, splitIndex])
   @@index([userId, startTime])
+  @@index([userId, isDeleted])
 }
 
 model TimesheetEntry {

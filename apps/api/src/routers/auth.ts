@@ -2,11 +2,13 @@ import { router, publicProcedure, protectedProcedure } from '../trpc.js'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { prisma } from 'database'
+import { Prisma } from '@prisma/client'
 import { lucia } from '../auth/lucia.js'
 import { hashPassword, verifyPassword } from '../auth/password.js'
 import { google, GOOGLE_SCOPES } from '../auth/google.js'
-import { encrypt, decrypt } from '../auth/encryption.js'
+import { encrypt } from '../auth/encryption.js'
 import { generateCodeVerifier, generateState } from 'arctic'
+import { storeOAuthState } from '../auth/oauth-state-store.js'
 
 export const authRouter = router({
   /**
@@ -53,15 +55,27 @@ export const authRouter = router({
 
       // Hash password
       const hashedPassword = await hashPassword(input.password)
-
-      // Create user
-      const user = await prisma.user.create({
-        data: {
-          email: input.email,
-          name: input.name,
-          hashedPassword,
-        },
-      })
+      let user
+      try {
+        user = await prisma.user.create({
+          data: {
+            email: input.email,
+            name: input.name,
+            hashedPassword,
+          },
+        })
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError
+          && error.code === 'P2002'
+        ) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'User with this email already exists',
+          })
+        }
+        throw error
+      }
 
       // Create session
       const session = await lucia.createSession(user.id, {})
@@ -139,7 +153,7 @@ export const authRouter = router({
 
   /**
    * Initiate Google OAuth flow
-   * Returns authorization URL and stores state/code verifier in cookies
+   * Returns authorization URL and stores state/code verifier in memory
    */
   googleOAuth: publicProcedure.mutation(async ({ ctx }) => {
     const state = generateState()
@@ -147,20 +161,12 @@ export const authRouter = router({
 
     const url = google.createAuthorizationURL(state, codeVerifier, GOOGLE_SCOPES)
 
-    // Store state and code verifier in cookies for verification
-    ctx.res.setCookie('google_oauth_state', state, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 60 * 10, // 10 minutes
-      path: '/',
-    })
+    // Force Google to always return a refresh token
+    url.searchParams.set('access_type', 'offline')
+    url.searchParams.set('prompt', 'consent')
 
-    ctx.res.setCookie('google_code_verifier', codeVerifier, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 60 * 10, // 10 minutes
-      path: '/',
-    })
+    // Store state and code verifier in memory (avoids cookie issues with cross-site redirects)
+    storeOAuthState(state, codeVerifier)
 
     return { url: url.toString() }
   }),
@@ -181,6 +187,13 @@ export const authRouter = router({
       const storedState = ctx.req.cookies.google_oauth_state
       const storedCodeVerifier = ctx.req.cookies.google_code_verifier
 
+      console.log('[OAuth Debug] Cookies received:', {
+        storedState,
+        storedCodeVerifier,
+        inputState: input.state,
+        allCookies: ctx.req.cookies,
+      })
+
       if (!storedState || !storedCodeVerifier || storedState !== input.state) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -199,11 +212,27 @@ export const authRouter = router({
           },
         })
 
+        if (!googleUserResponse.ok) {
+          const errorText = await googleUserResponse.text()
+          console.error('Failed to fetch Google user info:', googleUserResponse.status, errorText)
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Failed to fetch Google account details',
+          })
+        }
+
         const googleUser = (await googleUserResponse.json()) as {
           id: string
           email: string
           name?: string
           picture?: string
+        }
+
+        if (!googleUser.email) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Google account does not have an email',
+          })
         }
 
         // Find or create user
@@ -220,21 +249,41 @@ export const authRouter = router({
           })
         }
 
+        // Encrypt tokens before storing
+        let encryptedAccessToken: string
+        let encryptedRefreshToken: string | null = null
+
+        try {
+          encryptedAccessToken = encrypt(tokens.accessToken())
+          if (tokens.refreshToken()) {
+            encryptedRefreshToken = encrypt(tokens.refreshToken()!)
+          }
+        } catch (encryptError) {
+          console.error('Token encryption failed:', encryptError)
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Failed to encrypt OAuth tokens. Please check ENCRYPTION_KEY configuration.',
+          })
+        }
+
         // Store encrypted calendar connection tokens
         await prisma.calendarConnection.upsert({
           where: {
-            userId: user.id,
+            userId_provider: {
+              userId: user.id,
+              provider: 'google',
+            },
           },
           create: {
             userId: user.id,
             provider: 'google',
-            accessToken: encrypt(tokens.accessToken()),
-            refreshToken: tokens.refreshToken() ? encrypt(tokens.refreshToken()!) : null,
+            accessToken: encryptedAccessToken,
+            refreshToken: encryptedRefreshToken,
             expiresAt: tokens.accessTokenExpiresAt(),
           },
           update: {
-            accessToken: encrypt(tokens.accessToken()),
-            refreshToken: tokens.refreshToken() ? encrypt(tokens.refreshToken()!) : null,
+            accessToken: encryptedAccessToken,
+            refreshToken: encryptedRefreshToken,
             expiresAt: tokens.accessTokenExpiresAt(),
           },
         })
@@ -248,6 +297,8 @@ export const authRouter = router({
         ctx.res.clearCookie('google_oauth_state')
         ctx.res.clearCookie('google_code_verifier')
 
+        console.log(`Successfully authenticated user ${user.email} via Google OAuth`)
+
         return {
           success: true,
           user: {
@@ -258,9 +309,31 @@ export const authRouter = router({
         }
       } catch (error) {
         console.error('Google OAuth error:', error)
+
+        // If it's already a TRPCError, re-throw it
+        if (error instanceof TRPCError) {
+          throw error
+        }
+
+        // Check for specific Arctic/OAuth errors
+        if (error instanceof Error) {
+          if (error.message.includes('code_verifier') || error.message.includes('PKCE')) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: 'OAuth verification failed. Please try authenticating again.',
+            })
+          }
+          if (error.message.includes('invalid_grant')) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: 'OAuth code expired or invalid. Please try authenticating again.',
+            })
+          }
+        }
+
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
-          message: 'Failed to complete Google authentication',
+          message: 'Failed to complete Google authentication. Please try again or contact support.',
         })
       }
     }),

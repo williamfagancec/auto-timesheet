@@ -2,9 +2,8 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
-const SALT_LENGTH = 64;
 const TAG_LENGTH = 16;
-const TAG_POSITION = SALT_LENGTH + IV_LENGTH;
+const TAG_POSITION = IV_LENGTH;
 const ENCRYPTED_POSITION = TAG_POSITION + TAG_LENGTH;
 
 /**
@@ -29,7 +28,6 @@ function getEncryptionKey(): Buffer {
 export function encrypt(text: string): string {
   const key = getEncryptionKey();
   const iv = randomBytes(IV_LENGTH);
-  const salt = randomBytes(SALT_LENGTH);
 
   const cipher = createCipheriv(ALGORITHM, key, iv);
   const encrypted = Buffer.concat([
@@ -39,8 +37,8 @@ export function encrypt(text: string): string {
 
   const tag = cipher.getAuthTag();
 
-  // Combine: salt + iv + tag + encrypted
-  const result = Buffer.concat([salt, iv, tag, encrypted]);
+  // Combine iv + tag + encrypted data
+  const result = Buffer.concat([iv, tag, encrypted]);
   return result.toString("base64");
 }
 
@@ -53,8 +51,7 @@ export function decrypt(encryptedData: string): string {
   const buffer = Buffer.from(encryptedData, "base64");
 
   // Extract components
-  const salt = buffer.subarray(0, SALT_LENGTH);
-  const iv = buffer.subarray(SALT_LENGTH, TAG_POSITION);
+  const iv = buffer.subarray(0, IV_LENGTH);
   const tag = buffer.subarray(TAG_POSITION, ENCRYPTED_POSITION);
   const encrypted = buffer.subarray(ENCRYPTED_POSITION);
 

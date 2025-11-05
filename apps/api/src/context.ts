@@ -6,6 +6,13 @@ export async function createContext({ req, res }: CreateFastifyContextOptions) {
   // Extract session ID from cookie
   const sessionId = req.cookies[lucia.sessionCookieName] ?? null
 
+  console.log('[Context] Session cookie check:', {
+    url: req.url,
+    cookieName: lucia.sessionCookieName,
+    sessionId: sessionId ? sessionId.substring(0, 20) + '...' : null,
+    allCookies: Object.keys(req.cookies),
+  })
+
   let user: User | null = null
   let session: Session | null = null
 
@@ -13,6 +20,12 @@ export async function createContext({ req, res }: CreateFastifyContextOptions) {
     const result = await lucia.validateSession(sessionId)
     session = result.session
     user = result.user
+
+    console.log('[Context] Session validation result:', {
+      hasSession: !!session,
+      hasUser: !!user,
+      userId: user?.id,
+    })
 
     // Create new session cookie if session was refreshed
     if (session && session.fresh) {
