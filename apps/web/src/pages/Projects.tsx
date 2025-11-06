@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { KeyboardEvent } from 'react'
 import { format } from 'date-fns'
 import { trpc } from '../lib/trpc'
 
@@ -73,7 +74,7 @@ export function Projects() {
     updateMutation.mutate({ id, name: editingName })
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent, id: string) => {
+  const handleKeyDown = (e: KeyboardEvent, id: string) => {
     if (e.key === 'Enter') {
       handleSaveEdit(id)
     } else if (e.key === 'Escape') {

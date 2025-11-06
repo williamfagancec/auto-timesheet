@@ -330,11 +330,16 @@ export function getUserLocalNow(timezone: string): Date {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
-      hour12: false
+      hour12: false,
+      timeZoneName: 'shortOffset',
     })
 
     const parts = formatter.formatToParts(now)
     const getValue = (type: string) => parts.find(p => p.type === type)?.value || '0'
+    const offsetPart = parts.find(p => p.type === 'timeZoneName')?.value ?? 'GMT+00:00'
+    const offsetMatch = offsetPart.match(/GMT([+-]\d{2})(?::?(\d{2}))?/)
+    const offset = offsetMatch ? `${offsetMatch[1]}:${offsetMatch[2] ?? '00'}` : '+00:00'
+
 
     // Create a date string in ISO format for the user's local time
     const year = getValue('year')
@@ -346,7 +351,7 @@ export function getUserLocalNow(timezone: string): Date {
 
     // Create a new Date object representing the local time as if it were UTC
     // This gives us a UTC timestamp that represents the user's current local time
-    const localTime = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}Z`)
+    const localTime = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}${offset}`)
 
     console.log(`Current UTC time: ${now.toISOString()}`)
     console.log(`User's local time (${timezone}): ${localTime.toISOString()}`)
