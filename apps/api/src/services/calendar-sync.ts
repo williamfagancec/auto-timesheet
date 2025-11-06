@@ -22,6 +22,7 @@ interface GoogleCalendarEvent {
   attendees?: Array<{
     email: string
     responseStatus: 'needsAction' | 'declined' | 'tentative' | 'accepted'
+    self?: boolean // Indicates if this attendee is the signed-in user
   }>
   status?: string // confirmed, tentative, cancelled
   creator?: {
@@ -113,12 +114,10 @@ export function filterEvents(events: GoogleCalendarEvent[]): GoogleCalendarEvent
       return false
     }
 
-    // Check if user declined the event
+    // Check if the signed-in user themselves declined the event
     if (event.attendees) {
-      const userDeclined = event.attendees.some(
-        (attendee) => attendee.responseStatus === 'declined'
-      )
-      if (userDeclined) {
+      const selfAttendee = event.attendees.find((attendee) => attendee.self === true)
+      if (selfAttendee && selfAttendee.responseStatus === 'declined') {
         return false
       }
     }
@@ -214,9 +213,10 @@ export async function saveEventsToDatabase(
     }
 
     try {
-      // Check if event spans multiple days
-      if (isMultiDayEvent(startTime, endTime)) {
-        console.log(`Splitting multi-day event ${event.id}`)
+      // Check if event spans multiple days AND is a timed event (not all-day)
+      // All-day events should remain as single records with isAllDay=true
+      if (isMultiDayEvent(startTime, endTime) && !isAllDay) {
+        console.log(`Splitting multi-day timed event ${event.id}`)
         const segments = splitMultiDayEvent(startTime, endTime)
 
         // First, delete any existing segments that are no longer valid

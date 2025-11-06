@@ -161,15 +161,18 @@ export const calendarRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
+      const startDate = new Date(input.startDate)
+      const endDate = new Date(input.endDate)
+
       const events = await prisma.calendarEvent.findMany({
         where: {
           userId: ctx.user.id,
           isDeleted: false,
           startTime: {
-            gte: new Date(input.startDate),
+            lt: endDate,
           },
           endTime: {
-            lte: new Date(input.endDate),
+            gt: startDate,
           },
         },
         orderBy: {

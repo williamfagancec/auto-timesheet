@@ -155,7 +155,7 @@ export const authRouter = router({
    * Initiate Google OAuth flow
    * Returns authorization URL and stores state/code verifier in memory
    */
-  googleOAuth: publicProcedure.mutation(async ({ ctx }) => {
+  googleOAuth: publicProcedure.mutation(async () => {
     const state = generateState()
     const codeVerifier = generateCodeVerifier()
 
@@ -187,12 +187,13 @@ export const authRouter = router({
       const storedState = ctx.req.cookies.google_oauth_state
       const storedCodeVerifier = ctx.req.cookies.google_code_verifier
 
+     if (process.env.DEBU_OAUTH === 'true') {
       console.log('[OAuth Debug] Cookies received:', {
         storedState,
         storedCodeVerifier,
         inputState: input.state,
-        allCookies: ctx.req.cookies,
       })
+     }
 
       if (!storedState || !storedCodeVerifier || storedState !== input.state) {
         throw new TRPCError({

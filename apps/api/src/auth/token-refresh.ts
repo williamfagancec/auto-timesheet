@@ -18,6 +18,7 @@ export function isTokenExpired(expiresAt: Date, bufferMinutes: number = 5): bool
 export async function refreshGoogleToken(refreshToken: string): Promise<{
   accessToken: string
   expiresAt: Date
+  refreshToken?:string
 }> {
   try {
     const tokens = await google.refreshAccessToken(refreshToken)
@@ -25,6 +26,7 @@ export async function refreshGoogleToken(refreshToken: string): Promise<{
     return {
       accessToken: tokens.accessToken(),
       expiresAt: tokens.accessTokenExpiresAt(),
+      ...(tokens.refreshToken() && { refreshToken: tokens.refreshToken() }),
     }
   } catch (error) {
     console.error('Failed to refresh Google token:', error)
@@ -106,6 +108,10 @@ export async function getValidAccessToken(
         data: {
           accessToken: encrypt(newTokens.accessToken),
           expiresAt: newTokens.expiresAt,
+          // Update refresh token if Google rotates it
+          ...(newTokens.refreshToken && {
+            refreshToken: encrypt(newTokens.refreshToken)
+        }),
         },
       })
 
@@ -165,6 +171,10 @@ export async function refreshAllExpiredTokens(): Promise<{
         data: {
           accessToken: encrypt(newTokens.accessToken),
           expiresAt: newTokens.expiresAt,
+          // Update refresh token if Google rotates it
+          ...(newTokens.refreshToken && {
+            refreshToken: encrypt(newTokens.refreshToken)
+          }),
         },
       })
 

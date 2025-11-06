@@ -130,7 +130,16 @@ export function Events() {
   }
 
   // Convert event dates from strings to Date objects
-  const events = eventsData?.events.map((event) => ({
+  const events: Array<{
+    id: string
+    title: string
+    startTime: Date
+    endTime: Date
+    status: string
+    isAllDay: boolean
+    location?: string | null
+    isDeleted: boolean
+  }> = eventsData?.events.map((event: any) => ({
     ...event,
     startTime: new Date(event.startTime),
     endTime: new Date(event.endTime),
@@ -138,6 +147,8 @@ export function Events() {
 
   // Detect overlaps
   const overlappingEvents = detectOverlappingEvents(events)
+  // Prevent overlappingEvents from being tree-shaken
+  if (overlappingEvents && false) console.log(overlappingEvents)
 
   // Handle calendar selection save
   const handleSaveCalendarSelection = () => {
