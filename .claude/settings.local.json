@@ -27,7 +27,8 @@
       "Bash(pnpm dev:api:*)",
       "Bash(pnpm dev)",
       "Bash(pnpm:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": [],
     "ask": []

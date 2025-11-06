@@ -16,6 +16,13 @@ export const timesheetRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const weekStart = new Date(input.weekStartDate)
+      const dayOfWeek = weekStart.getDay()
+      if (dayOfWeek !== 1) { // 1 = Monday
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'weekStartDate must be a Monday at midnight UTC',
+        })
+      }
       const weekEnd = new Date(weekStart)
       weekEnd.setDate(weekEnd.getDate() + 7) // Add 7 days
 

@@ -235,7 +235,13 @@ export function TimesheetGrid() {
                         step="0.25"
                         min="0"
                         max="24"
-                        value={hours > 0 ? hours.toFixed(1) : ''}
+                        value={
+                          hours > 0
+                          ? (Number.isInteger(hours)
+                            ? hours.toString()
+                            : hours.toFixed(2).replace(/\.?0+$/, ''))
+                          : ''
+                        }
                         onChange={(e) => handleCellChange(project.id, day.key, e.target.value)}
                         onClick={(e) => e.stopPropagation()}
                         className={`w-full text-center bg-transparent outline-none ${

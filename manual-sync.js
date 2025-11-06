@@ -23,7 +23,9 @@ async function manualSync() {
 
     // Get calendar connection
     const connection = await prisma.calendarConnection.findUnique({
-      where: { userId: user.id }
+      where: {
+        userId_provider: { userId: user.id, provider: 'google' }
+      }
     });
 
     if (!connection) {

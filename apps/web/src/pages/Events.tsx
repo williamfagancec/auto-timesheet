@@ -65,6 +65,7 @@ export function Events() {
       isCategorized: !!entry.projectId,
       isSkipped: entry.isSkipped,
       projectName: entry.project?.name,
+      projectId: entry.projectId,
     }))
 
   // Skip event mutation
@@ -383,7 +384,7 @@ export function Events() {
                         {!isSkipped && (
                           <div className="flex-shrink-0 w-64">
                             <ProjectPicker
-                              value={undefined}
+                              value={event.projectId}
                               onSelect={(projectId) => handleProjectSelect(event.id, projectId)}
                               placeholder={isCategorized ? "Change project..." : "Select project..."}
                             />

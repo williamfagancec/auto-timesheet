@@ -80,6 +80,7 @@ export function ProjectPicker({
     { sortBy: 'name' },
     {
       staleTime: 5 * 60 * 1000,
+      enabled: Boolean(value),
       select: (projects) => projects.find((p) => p.id === value),
     }
   )
@@ -97,6 +98,8 @@ export function ProjectPicker({
 
     if (onCreateNew) {
       onCreateNew(search)
+      setOpen(false)
+      setSearch('')
     } else {
       createProjectMutation.mutate({ name: search })
     }
@@ -254,12 +257,13 @@ export function ProjectPicker({
       {open && (
         <div
           className="fixed inset-0 z-40"
-          onClick={() => {
+          onClick={(e) => {
+            // Prevent closing if clicking on the button itself
+            if ((e.target as HTMLElement).closest('button'))  return
             setOpen(false)
             setSearch('')
           }}
         />
       )}
     </div>
-  )
-}
+  )}

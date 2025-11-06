@@ -3,6 +3,17 @@ import { z } from 'zod'
 import { prisma } from 'database'
 import { TRPCError } from '@trpc/server'
 
+const projectNameSchema = z
+  .string()
+  .transform((val) => val.replace(/<[^>]*>/g, '').trim())
+  .pipe(
+    z
+      .string()
+      .min(1, 'Project name cannot be empty')
+      .max(100, 'Project name must be less than 100 characters')
+      .regex(/\S/, 'Project name cannot be only whitespace')
+  )
+
 export const projectRouter = router({
   /**
    * List projects with optional filtering and sorting
@@ -59,13 +70,7 @@ export const projectRouter = router({
   create: protectedProcedure
     .input(
       z.object({
-        name: z
-          .string()
-          .trim()
-          .min(1, 'Project name cannot be empty')
-          .max(100, 'Project name must be less than 100 characters')
-          .regex(/\S/, 'Project name cannot be only whitespace')
-          .transform((val) => val.replace(/<[^>]*>/g, '')), // Strip HTML tags
+        name: projectNameSchema,
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -107,15 +112,10 @@ export const projectRouter = router({
     .input(
       z.object({
         id: z.string(),
-        name: z
-          .string()
-          .trim()
-          .min(1, 'Project name cannot be empty')
-          .max(100, 'Project name must be less than 100 characters')
-          .regex(/\S/, 'Project name cannot be only whitespace')
-          .transform((val) => val.replace(/<[^>]*>/g, '')),
+        name: projectNameSchema,
       })
     )
+    
     .mutation(async ({ ctx, input }) => {
       // Verify project exists and belongs to user
       const project = await prisma.project.findUnique({
