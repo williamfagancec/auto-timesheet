@@ -154,3 +154,75 @@ export async function fetchCalendarEvents(
     throw error
   }
 }
+
+/**
+ * Interface for Google Calendar primary calendar response
+ */
+export interface GoogleCalendarPrimaryResponse {
+  id: string
+  summary: string
+  timeZone: string
+}
+
+/**
+ * Fetch user's timezone from their Google Calendar primary calendar
+ * This is called during OAuth callback to automatically detect user's timezone
+ *
+ * @param accessToken - Fresh OAuth access token (not userId, since CalendarConnection doesn't exist yet)
+ * @returns IANA timezone identifier (e.g., "Australia/Sydney", "America/New_York")
+ * @throws Error if fetch fails or timezone not found
+ */
+export async function getUserTimezone(accessToken: string): Promise<string> {
+  try {
+    const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary', {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      signal: AbortSignal.timeout(5000), // 5 seconds timeout
+    })
+
+    if (!response.ok) {
+      // Try to get detailed error from Google API
+      let errorDetails = response.statusText
+      try {
+        const errorBody = await response.json() as { error?: { message?: string } }
+        if (errorBody.error && errorBody.error.message) {
+          errorDetails = errorBody.error.message
+        }
+      } catch {
+        // If response body isn't JSON, use statusText
+      }
+
+      const errorMessage = `Failed to fetch timezone from Google Calendar (${response.status}): ${errorDetails}`
+      console.error(errorMessage)
+
+      // Provide specific guidance based on status code
+      if (response.status === 401) {
+        throw new Error('INVALID_TOKEN: Google Calendar access token is invalid or expired.')
+      } else if (response.status === 403) {
+        throw new Error('INSUFFICIENT_PERMISSIONS: Missing required Google Calendar permissions.')
+      } else if (response.status === 404) {
+        throw new Error('CALENDAR_NOT_FOUND: Primary calendar not found.')
+      } else if (response.status === 429) {
+        throw new Error('RATE_LIMIT_EXCEEDED: Too many requests to Google Calendar API.')
+      }
+
+      throw new Error(errorMessage)
+    }
+
+    const data = (await response.json()) as GoogleCalendarPrimaryResponse
+
+    if (!data.timeZone) {
+      console.warn('No timezone returned from Google Calendar API, using UTC as fallback')
+      return 'UTC'
+    }
+
+    console.log(`Detected user timezone from Google Calendar: ${data.timeZone}`)
+    return data.timeZone
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('REQUEST_TIMEOUT: Request to Google Calendar API timed out.')
+    }
+    throw error
+  }
+}

@@ -44,6 +44,7 @@ model CalendarConnection {
   refreshToken        String?
   expiresAt           DateTime?
   selectedCalendarIds Json?    // Array of calendar IDs to sync
+  timezone            String   @default("UTC") // User's timezone (e.g., "Australia/Sydney")
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 

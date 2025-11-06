@@ -5,6 +5,163 @@ import { TRPCError } from '@trpc/server'
 
 export const timesheetRouter = router({
   /**
+   * Get weekly grid data with aggregated hours per project per day
+   * Returns structured data for the weekly timesheet grid view
+   */
+  getWeeklyGrid: protectedProcedure
+    .input(
+      z.object({
+        weekStartDate: z.string().datetime(), // Monday at midnight UTC
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const weekStart = new Date(input.weekStartDate)
+      const weekEnd = new Date(weekStart)
+      weekEnd.setDate(weekEnd.getDate() + 7) // Add 7 days
+
+      // Get all timesheet entries for the week (excluding skipped)
+      const entries = await prisma.timesheetEntry.findMany({
+        where: {
+          userId: ctx.user.id,
+          date: {
+            gte: weekStart,
+            lt: weekEnd,
+          },
+          isSkipped: false,
+        },
+        include: {
+          project: true,
+        },
+      })
+
+      // Get all active projects for the user
+      const allProjects = await prisma.project.findMany({
+        where: {
+          userId: ctx.user.id,
+          isArchived: false,
+        },
+        orderBy: {
+          lastUsedAt: 'desc',
+        },
+      })
+
+      // Helper: Get day of week (0 = Monday, 6 = Sunday)
+      const getDayOfWeek = (date: Date): number => {
+        const day = date.getDay()
+        return day === 0 ? 6 : day - 1 // Convert Sunday=0 to Sunday=6
+      }
+
+      // Helper: Day names
+      const dayNames = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
+
+      // Build project data structure
+      const projectsData = allProjects.map((project) => {
+        const dailyHours: Record<string, number> = {
+          mon: 0,
+          tue: 0,
+          wed: 0,
+          thu: 0,
+          fri: 0,
+          sat: 0,
+          sun: 0,
+        }
+
+        const notes: Record<string, string | undefined> = {
+          mon: undefined,
+          tue: undefined,
+          wed: undefined,
+          thu: undefined,
+          fri: undefined,
+          sat: undefined,
+          sun: undefined,
+        }
+
+        // Aggregate entries for this project
+        const projectEntries = entries.filter((e) => e.projectId === project.id)
+
+        projectEntries.forEach((entry) => {
+          const dayIndex = getDayOfWeek(entry.date)
+          const dayName = dayNames[dayIndex]
+          const hours = entry.duration / 60 // Convert minutes to hours
+
+          dailyHours[dayName] = (dailyHours[dayName] || 0) + hours
+
+          // Concatenate notes if multiple entries exist
+          if (entry.notes) {
+            if (notes[dayName]) {
+              notes[dayName] += `\n${entry.notes}`
+            } else {
+              notes[dayName] = entry.notes
+            }
+          }
+        })
+
+        // Calculate weekly total
+        const weeklyTotal = Object.values(dailyHours).reduce((sum, hours) => sum + hours, 0)
+
+        return {
+          id: project.id,
+          name: project.name,
+          dailyHours,
+          weeklyTotal,
+          notes,
+        }
+      })
+
+      // Calculate daily totals across all projects
+      const dailyTotals = {
+        mon: 0,
+        tue: 0,
+        wed: 0,
+        thu: 0,
+        fri: 0,
+        sat: 0,
+        sun: 0,
+      }
+
+      entries.forEach((entry) => {
+        if (entry.projectId) {
+          // Only count categorized entries
+          const dayIndex = getDayOfWeek(entry.date)
+          const dayName = dayNames[dayIndex]
+          const hours = entry.duration / 60
+
+          dailyTotals[dayName] = (dailyTotals[dayName] || 0) + hours
+        }
+      })
+
+      // Calculate uncategorized hours (entries without projectId)
+      const uncategorizedHours = {
+        mon: 0,
+        tue: 0,
+        wed: 0,
+        thu: 0,
+        fri: 0,
+        sat: 0,
+        sun: 0,
+      }
+
+      entries.forEach((entry) => {
+        if (!entry.projectId) {
+          const dayIndex = getDayOfWeek(entry.date)
+          const dayName = dayNames[dayIndex]
+          const hours = entry.duration / 60
+
+          uncategorizedHours[dayName] = (uncategorizedHours[dayName] || 0) + hours
+        }
+      })
+
+      return {
+        weekStart: weekStart.toISOString(),
+        weekEnd: weekEnd.toISOString(),
+        projects: projectsData,
+        dailyTotals,
+        uncategorizedHours,
+        targetHoursPerDay: 7.5,
+      }
+    }),
+
+  /**
    * Get uncategorized calendar events for a date range
    * Returns events that don't have a timesheet entry or have one without a project assignment
    */
@@ -293,5 +450,249 @@ export const timesheetRouter = router({
       })
 
       return entries
+    }),
+
+  /**
+   * Update hours for a specific project/day cell
+   * Creates or updates a manual adjustment entry to reach the target hours
+   */
+  updateCell: protectedProcedure
+    .input(
+      z.object({
+        projectId: z.string(),
+        date: z.string().datetime(), // Day at midnight UTC
+        hours: z.number().min(0).max(24),
+        notes: z.string().max(500).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Verify project exists and belongs to user
+      const project = await prisma.project.findUnique({
+        where: { id: input.projectId },
+      })
+
+      if (!project) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Project not found',
+        })
+      }
+
+      if (project.userId !== ctx.user.id) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'You do not have permission to modify this project',
+        })
+      }
+
+      const dateStart = new Date(input.date)
+      const dateEnd = new Date(dateStart)
+      dateEnd.setDate(dateEnd.getDate() + 1)
+
+      const targetMinutes = Math.round(input.hours * 60)
+
+      // Get all existing entries for this project/day
+      const existingEntries = await prisma.timesheetEntry.findMany({
+        where: {
+          userId: ctx.user.id,
+          projectId: input.projectId,
+          date: {
+            gte: dateStart,
+            lt: dateEnd,
+          },
+          isSkipped: false,
+        },
+        include: {
+          event: true,
+        },
+      })
+
+      // Find event-based and manual entries
+      const eventEntries = existingEntries.filter((e) => e.eventId !== null)
+      const manualEntries = existingEntries.filter((e) => e.isManual && e.eventId === null)
+
+      const eventMinutes = eventEntries.reduce((sum, e) => sum + e.duration, 0)
+      const adjustmentMinutes = targetMinutes - eventMinutes
+
+      try {
+        await prisma.$transaction(async (tx) => {
+          // Delete all existing manual adjustment entries for this day/project
+          await tx.timesheetEntry.deleteMany({
+            where: {
+              id: { in: manualEntries.map((e) => e.id) },
+            },
+          })
+
+          // Create new manual adjustment entry if needed (non-zero hours)
+          if (targetMinutes > 0) {
+            // If there are event entries, create adjustment entry for the delta
+            // If no event entries, create manual entry for full amount
+            if (eventEntries.length > 0 && adjustmentMinutes !== 0) {
+              await tx.timesheetEntry.create({
+                data: {
+                  userId: ctx.user.id,
+                  projectId: input.projectId,
+                  date: dateStart,
+                  duration: adjustmentMinutes,
+                  isManual: true,
+                  notes: input.notes,
+                },
+              })
+            } else if (eventEntries.length === 0) {
+              // No events, create full manual entry
+              await tx.timesheetEntry.create({
+                data: {
+                  userId: ctx.user.id,
+                  projectId: input.projectId,
+                  date: dateStart,
+                  duration: targetMinutes,
+                  isManual: true,
+                  notes: input.notes,
+                },
+              })
+            } else if (input.notes) {
+              // Hours match events but notes provided - update first event entry with notes
+              if (eventEntries[0]) {
+                await tx.timesheetEntry.update({
+                  where: { id: eventEntries[0].id },
+                  data: { notes: input.notes },
+                })
+              }
+            }
+          } else if (input.notes && eventEntries.length > 0) {
+            // Zero hours but notes provided - update first event entry
+            await tx.timesheetEntry.update({
+              where: { id: eventEntries[0].id },
+              data: { notes: input.notes },
+            })
+          }
+
+          // Increment project usage tracking
+          await tx.project.update({
+            where: { id: input.projectId },
+            data: {
+              useCount: { increment: 1 },
+              lastUsedAt: new Date(),
+            },
+          })
+        })
+
+        return {
+          success: true,
+          updatedHours: input.hours,
+        }
+      } catch (error) {
+        console.error('Failed to update cell:', error)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to update timesheet cell',
+        })
+      }
+    }),
+
+  /**
+   * Assign uncategorized event(s) to a project
+   * Updates existing timesheet entries or creates new ones
+   */
+  assignEventToProject: protectedProcedure
+    .input(
+      z.object({
+        eventIds: z.array(z.string()).min(1).max(100),
+        projectId: z.string(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Verify project exists and belongs to user
+      const project = await prisma.project.findUnique({
+        where: { id: input.projectId },
+      })
+
+      if (!project) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Project not found',
+        })
+      }
+
+      if (project.userId !== ctx.user.id) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'You do not have permission to access this project',
+        })
+      }
+
+      // Get all calendar events
+      const events = await prisma.calendarEvent.findMany({
+        where: {
+          id: { in: input.eventIds },
+          userId: ctx.user.id,
+        },
+      })
+
+      if (events.length !== input.eventIds.length) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Some events not found or do not belong to you',
+        })
+      }
+
+      try {
+        await prisma.$transaction(async (tx) => {
+          for (const event of events) {
+            const durationMinutes = Math.round(
+              (event.endTime.getTime() - event.startTime.getTime()) / 60000
+            )
+
+            // Check if timesheet entry already exists for this event
+            const existingEntry = await tx.timesheetEntry.findUnique({
+              where: { eventId: event.id },
+            })
+
+            if (existingEntry) {
+              // Update existing entry with new project
+              await tx.timesheetEntry.update({
+                where: { id: existingEntry.id },
+                data: {
+                  projectId: input.projectId,
+                  isSkipped: false,
+                },
+              })
+            } else {
+              // Create new entry
+              await tx.timesheetEntry.create({
+                data: {
+                  userId: ctx.user.id,
+                  eventId: event.id,
+                  projectId: input.projectId,
+                  date: event.startTime,
+                  duration: durationMinutes,
+                  isManual: false,
+                  isSkipped: false,
+                },
+              })
+            }
+          }
+
+          // Increment project usage
+          await tx.project.update({
+            where: { id: input.projectId },
+            data: {
+              useCount: { increment: events.length },
+              lastUsedAt: new Date(),
+            },
+          })
+        })
+
+        return {
+          success: true,
+          assignedCount: events.length,
+        }
+      } catch (error) {
+        console.error('Failed to assign events to project:', error)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to assign events to project',
+        })
+      }
     }),
 })
