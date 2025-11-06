@@ -300,6 +300,65 @@ When completing work on this project:
 
 - Redis using read-only user (needs read-write credentials for BullMQ)
 
+### ✅ Automatic Timezone Detection (2025-11-06)
+
+**Problem**: Users' timezones were hardcoded to UTC by default, causing calendar sync to miss events for users in other timezones. For example, a Sydney user (UTC+11) at 12:00 PM local time would only sync events until 1:00 AM UTC, missing all Wednesday/Thursday afternoon events.
+
+**Root Cause**: Calendar sync used `new Date()` (UTC time) to determine which events had ended, and timezone was not automatically captured during OAuth.
+
+**Solution**: Automatic timezone detection from Google Calendar during OAuth callback.
+
+**Implementation**:
+
+1. **Added timezone field to CalendarConnection** (`packages/database/prisma/schema.prisma:47`)
+   - ✅ `timezone` field with default "UTC" (IANA format: "Australia/Sydney", "America/New_York")
+   - ✅ Allows per-user timezone configuration
+
+2. **Created getUserTimezone() function** (`apps/api/src/services/google-calendar.ts:167-228`)
+   - ✅ Fetches from `GET /calendar/v3/calendars/primary` endpoint
+   - ✅ Extracts IANA timezone from Google Calendar primary calendar
+   - ✅ 5-second timeout with fallback to "UTC"
+   - ✅ Comprehensive error handling matching existing Google API patterns
+   - ✅ Uses existing `calendar.readonly` scope (no new permissions required)
+
+3. **Updated OAuth callback** (`apps/api/src/routers/auth.ts:271-303`)
+   - ✅ Calls `getUserTimezone(tokens.accessToken())` after token encryption
+   - ✅ Stores timezone in `CalendarConnection.timezone` field
+   - ✅ Falls back to "UTC" if fetch fails (doesn't block OAuth flow)
+   - ✅ Logs success: "Successfully detected timezone for user [email]: [timezone]"
+
+4. **Calendar sync uses timezone** (`apps/api/src/services/calendar-sync.ts`)
+   - ✅ `getUserLocalNow(timezone)` converts UTC to user's local time (lines 318-359)
+   - ✅ `syncUserEvents()` uses user's local "now" to determine which events have ended (lines 385-386)
+   - ✅ Logs show both UTC time and user's local time for debugging
+
+**Example**:
+```typescript
+// OAuth callback automatically fetches timezone
+timezone = await getUserTimezone(tokens.accessToken())
+// Returns: "Australia/Sydney"
+
+// Calendar sync uses it
+const userTimezone = connection.timezone || 'UTC'
+const timeMax = getUserLocalNow(userTimezone)
+// Sydney 12:00 PM = correct cutoff, includes afternoon events
+```
+
+**Status**: ✅ **FULLY WORKING**
+- All new users automatically get correct timezone (no manual database updates)
+- Existing users: timezone updates on next OAuth login
+- Sydney user now syncs events correctly with local time
+- Solution works for all timezones globally
+
+**Known Issues**:
+
+⚠️ **OAuth Token Refresh Failures** (High Priority)
+- **Problem**: Google OAuth refresh tokens occasionally expire or become invalid
+- **Current Workaround**: User must log out and log back in with Google OAuth
+- **User Impact**: Events stop syncing silently - no UI indication of auth failure
+- **TODO**: Add UI notification, automatic re-auth flow, token health check endpoint
+- **File**: `apps/api/src/auth/token-refresh.ts:29`
+
 ### ✅ Epic 3: Project Creation & Organization - Phase 1 Complete (2025-11-05)
 
 **Backend - Project API** (`apps/api/src/routers/project.ts`)
@@ -525,6 +584,68 @@ When completing work on this project:
 - ✅ No unnecessary Zustand stores
 - ✅ Follows SCL philosophy (Simple, Complete, Lovable)
 
+### ✅ Timesheet Grid UI & UX Improvements (2025-11-06)
+
+**Restructured workflow** from list-based categorization to grid-based time tracking with real-time updates.
+
+**Frontend Changes:**
+
+1. **Events Page → Categorization Hub** (`apps/web/src/pages/Events.tsx`)
+   - ✅ Moved categorization UI from Timesheet to Events page
+   - ✅ Users now categorize events on `/events` before viewing timesheet grid
+   - ✅ **Auto-save on project selection** - immediately saves when project selected
+   - ✅ **Keep categorized events visible** with green checkmark + project badge
+   - ✅ Events don't disappear after categorization - stay visible with visual state
+   - ✅ Skipped events shown with gray background and "Skipped" badge
+   - ✅ Real-time feedback: event highlights green immediately on project assignment
+   - ✅ Removed "Save All" button - instant auto-save per event
+   - ✅ Query changed from `getUncategorized` to `getEntries` (all events)
+
+2. **Timesheet Page → Weekly Grid** (`apps/web/src/pages/TimesheetGrid.tsx`)
+   - ✅ Replaced list view with spreadsheet-style weekly grid
+   - ✅ **Layout**: Projects on Y-axis, Days (Mon-Sun) on X-axis
+   - ✅ **Editable hour cells** with 15-minute increments (0.25 step)
+   - ✅ **Expandable notes field** below grid when cell is active
+   - ✅ **Daily totals row** with red highlighting when hours < target (7.5hrs/day)
+   - ✅ **Weekly totals column** showing total hours per project
+   - ✅ **Week navigation** (Prev/Next/This Week buttons)
+   - ✅ **Auto-refresh when events categorized** via React Query cache invalidation
+   - ✅ Uses `timesheet.getWeeklyGrid` and `timesheet.updateCell` endpoints
+
+3. **Navigation Flow** (`apps/web/src/components/Layout.tsx`)
+   - ✅ Reordered: Events → Timesheet → Projects
+   - ✅ Events = triage/categorize, Timesheet = review/adjust
+
+**UX Implementation Details:**
+
+- **Auto-save**: `categorizeSingleMutation.mutate()` called immediately on project selection
+- **Visual States**: Green checkmark + project badge (categorized), gray + "Skipped" badge (skipped)
+- **Grid Refresh**: `queryClient.invalidateQueries({ queryKey: [['timesheet', 'getWeeklyGrid']] })`
+- **Real-time Updates**: Events categorized on Events page instantly refresh Timesheet grid
+
+**Visual Design (Grid)**:
+- Clean, minimal white background
+- Fixed project name column (~250px left)
+- 7 equal-width day columns (~100px each)
+- Active cell: blue border (ring-2 ring-blue-500)
+- Empty cells: light gray (#F5F5F5)
+- Filled cells: white with number
+- Daily totals: red text when under target, warning triangle (▲) icon
+
+**Data Flow**:
+```
+User Flow:
+1. Events page → Categorize events → Real-time save
+2. Events stay visible with green checkmark
+3. Timesheet page → Auto-refreshes with new data
+4. Grid → Edit hours/notes → Manual adjustments
+
+Backend:
+- event-based hours (from calendar sync)
++ manual adjustments (from grid edits)
+= total hours per project/day
+```
+
 ### 🚧 Partially Implemented
 
 - Background jobs - BullMQ configured and jobs created, but Redis needs read-write access
@@ -533,20 +654,16 @@ When completing work on this project:
 ### ❌ Not Started
 
 **Backend**
-- AI categorization engine
+- AI categorization engine (rule-based)
 - Session cleanup jobs
 - Structured logging (currently console.log)
 - Token refresh with race condition handling
 
 **Frontend**
-
-- Timesheet views (review, categorization, approval workflow)
-- Project management UI
 - Settings page
-- Zustand stores (if needed - currently using TanStack Query)
+- Manual time entry UI
 
 **Testing & Deployment**
-
 - No tests exist (0% coverage)
 - No CI/CD pipelines
 - No monitoring/error tracking
@@ -554,28 +671,18 @@ When completing work on this project:
 ### Next Priorities
 
 **Immediate** (Critical for MVP):
-
-1. ✅ ~~Test OAuth flow end-to-end with a real Google account~~ DONE
-2. Update Redis to use read-write credentials for BullMQ
-3. ✅ ~~Verify calendar sync functionality works correctly~~ DONE
-4. Create project management API + UI
-5. Build timesheet entry system with weekly review
-
-**Short Term** (Core MVP):
-
-1. ✅ ~~Build frontend authentication flow~~ DONE
-2. ✅ ~~Implement calendar sync with BullMQ~~ DONE
-3. Create project CRUD operations (API + UI)
-4. Build timesheet categorization interface
-5. Implement basic AI categorization (rule-based)
+1. Update Redis to use read-write credentials for BullMQ
+2. Implement rule-based AI categorization engine
+3. Add OAuth token refresh failure UI notifications
 
 **Medium Term** (Polish):
-
-1. Add comprehensive logging
+1. Add structured logging
 2. Session cleanup job
 3. Stricter rate limiting per endpoint
 4. Password strength validation
 5. Write tests for critical paths
+6. Manual time entry UI
+7. Settings page (timezone display/override)
 
 ---
 

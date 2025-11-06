@@ -9,6 +9,7 @@ import { google, GOOGLE_SCOPES } from '../auth/google.js'
 import { encrypt } from '../auth/encryption.js'
 import { generateCodeVerifier, generateState } from 'arctic'
 import { storeOAuthState } from '../auth/oauth-state-store.js'
+import { getUserTimezone } from '../services/google-calendar.js'
 
 export const authRouter = router({
   /**
@@ -267,6 +268,16 @@ export const authRouter = router({
           })
         }
 
+        // Fetch user's timezone from Google Calendar (with fallback to UTC)
+        let timezone = 'UTC'
+        try {
+          timezone = await getUserTimezone(tokens.accessToken())
+          console.log(`Successfully detected timezone for user ${user.email}: ${timezone}`)
+        } catch (timezoneError) {
+          console.error('Failed to fetch timezone from Google Calendar, using UTC as fallback:', timezoneError)
+          // Don't block OAuth flow if timezone fetch fails - continue with UTC
+        }
+
         // Store encrypted calendar connection tokens
         await prisma.calendarConnection.upsert({
           where: {
@@ -281,11 +292,13 @@ export const authRouter = router({
             accessToken: encryptedAccessToken,
             refreshToken: encryptedRefreshToken,
             expiresAt: tokens.accessTokenExpiresAt(),
+            timezone,
           },
           update: {
             accessToken: encryptedAccessToken,
             refreshToken: encryptedRefreshToken,
             expiresAt: tokens.accessTokenExpiresAt(),
+            timezone,
           },
         })
 

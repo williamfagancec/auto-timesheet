@@ -30,16 +30,16 @@ export function Layout({ children }: LayoutProps) {
 
               <nav className="flex space-x-4">
                 <button
-                  onClick={() => navigate('/timesheet')}
-                  className="text-gray-700 hover:text-gray-900 px-3 py-2"
-                >
-                  Timesheet
-                </button>
-                <button
                   onClick={() => navigate('/events')}
                   className="text-gray-700 hover:text-gray-900 px-3 py-2"
                 >
                   Events
+                </button>
+                <button
+                  onClick={() => navigate('/timesheet')}
+                  className="text-gray-700 hover:text-gray-900 px-3 py-2"
+                >
+                  Timesheet
                 </button>
                 <button
                   onClick={() => navigate('/projects')}

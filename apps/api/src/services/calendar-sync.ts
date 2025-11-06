@@ -312,6 +312,53 @@ export function getStartOfCurrentWeek(): Date {
 }
 
 /**
+ * Get the current time in user's local timezone
+ * This is used to determine which events have already ended
+ */
+export function getUserLocalNow(timezone: string): Date {
+  try {
+    // Get current UTC time
+    const now = new Date()
+
+    // Convert to user's timezone using Intl.DateTimeFormat
+    // This gives us the local time components
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    })
+
+    const parts = formatter.formatToParts(now)
+    const getValue = (type: string) => parts.find(p => p.type === type)?.value || '0'
+
+    // Create a date string in ISO format for the user's local time
+    const year = getValue('year')
+    const month = getValue('month')
+    const day = getValue('day')
+    const hour = getValue('hour')
+    const minute = getValue('minute')
+    const second = getValue('second')
+
+    // Create a new Date object representing the local time as if it were UTC
+    // This gives us a UTC timestamp that represents the user's current local time
+    const localTime = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}Z`)
+
+    console.log(`Current UTC time: ${now.toISOString()}`)
+    console.log(`User's local time (${timezone}): ${localTime.toISOString()}`)
+
+    return localTime
+  } catch (error) {
+    console.error(`Failed to convert timezone ${timezone}, falling back to UTC:`, error)
+    return new Date()
+  }
+}
+
+/**
  * Sync events for a user from all their selected calendars
  * Only syncs PAST events from start of current week to now
  */
@@ -333,13 +380,17 @@ export async function syncUserEvents(userId: string): Promise<{
 
   const selectedCalendarIds = connection.selectedCalendarIds as string[]
   const timeMin = getStartOfCurrentWeek()
-  const timeMax = new Date() // Now
+
+  // Get "now" in user's timezone
+  const userTimezone = connection.timezone || 'UTC'
+  const timeMax = getUserLocalNow(userTimezone)
 
   let totalCreated = 0
   let totalUpdated = 0
   let calendarsProcessed = 0
 
   console.log(`Syncing ${selectedCalendarIds.length} calendars for user ${userId}`)
+  console.log(`User timezone: ${userTimezone}`)
   console.log(`Date range: ${timeMin.toISOString()} to ${timeMax.toISOString()}`)
 
   for (const calendarId of selectedCalendarIds) {

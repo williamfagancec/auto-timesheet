@@ -1,19 +1,21 @@
 import { useState, useEffect, useCallback } from 'react'
 import { trpc } from '../lib/trpc'
 import { DateRangeSelector } from '../components/DateRangeSelector'
-import { EventList } from '../components/EventList'
-import { DateRange, getDateRangeForPreset } from '../lib/dateUtils'
-import { detectOverlappingEvents } from '../lib/overlapDetection'
-
-const AUTO_REFRESH_INTERVAL = 15 * 60 * 1000 // 15 minutes
+import { DateRange, getDateRangeForPreset, groupByDate, formatTime, formatDuration } from '../lib/dateUtils'
+import { ProjectPicker } from '../components/ProjectPicker'
+import { format } from 'date-fns'
+import { useQueryClient } from '@tanstack/react-query'
 
 export function Events() {
+  const queryClient = useQueryClient()
+
   const [dateRange, setDateRange] = useState<DateRange>(() => {
     const range = getDateRangeForPreset('this-week')
     return range || { startDate: new Date(), endDate: new Date() }
   })
 
-  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null)
+  // No longer need categorization state - auto-save on selection
+
   const [showCalendarSetup, setShowCalendarSetup] = useState(false)
   const [selectedCalendarIds, setSelectedCalendarIds] = useState<string[]>([])
 
@@ -45,22 +47,46 @@ export function Events() {
     }
   }, [calendarStatus])
 
-  // Query events
+  // Query ALL events for the date range (not just uncategorized)
   const {
-    data: eventsData,
+    data: eventsData = [],
     isLoading: eventsLoading,
-    error: eventsError,
     refetch: refetchEvents,
-  } = trpc.calendar.getEvents.useQuery({
+  } = trpc.timesheet.getEntries.useQuery({
     startDate: dateRange.startDate.toISOString(),
     endDate: dateRange.endDate.toISOString(),
+  })
+
+  // Convert timesheet entries to event format with categorization info
+  const events = eventsData
+    .filter((entry: any) => entry.event) // Only entries with events
+    .map((entry: any) => ({
+      ...entry.event,
+      isCategorized: !!entry.projectId,
+      isSkipped: entry.isSkipped,
+      projectName: entry.project?.name,
+    }))
+
+  // Skip event mutation
+  const skipEventMutation = trpc.timesheet.skipEvent.useMutation({
+    onSuccess: () => {
+      refetchEvents()
+    },
+  })
+
+  // Single event categorization mutation (auto-save)
+  const categorizeSingleMutation = trpc.timesheet.bulkCategorize.useMutation({
+    onSuccess: () => {
+      refetchEvents()
+      // Invalidate timesheet grid cache so it auto-refreshes
+      queryClient.invalidateQueries({ queryKey: [['timesheet', 'getWeeklyGrid']] })
+    },
   })
 
   // Sync mutation
   const syncMutation = trpc.calendar.sync.useMutation({
     onSuccess: (data) => {
       console.log('Sync completed:', data)
-      setLastSyncTime(new Date())
       refetchEvents()
     },
     onError: (error) => {
@@ -68,87 +94,37 @@ export function Events() {
     },
   })
 
-  // Hide event mutation
-  const hideEventMutation = trpc.calendar.hideEvent.useMutation({
-    onSuccess: () => {
-      refetchEvents()
-    },
-  })
+  const handleProjectSelect = (eventId: string, projectId: string) => {
+    // Auto-save immediately when project is selected
+    categorizeSingleMutation.mutate({
+      entries: [{
+        eventId,
+        projectId,
+      }]
+    })
+  }
+
+  const handleSkip = (eventId: string) => {
+    skipEventMutation.mutate({ eventId })
+  }
 
   // Manual sync handler
   const handleSync = useCallback(() => {
     syncMutation.mutate()
   }, [syncMutation])
 
-  // Auto-refresh with Page Visibility API
-  useEffect(() => {
-    let intervalId: number | undefined
+  // Group events by date
+  const eventsWithDates = events.map((e: any) => ({
+    ...e,
+    startTime: new Date(e.startTime),
+    endTime: new Date(e.endTime),
+  }))
 
-    const startAutoRefresh = () => {
-      intervalId = window.setInterval(() => {
-        if (document.visibilityState === 'visible') {
-          console.log('Auto-refreshing events...')
-          refetchEvents()
-        }
-      }, AUTO_REFRESH_INTERVAL)
-    }
+  const groupedEvents = groupByDate(eventsWithDates)
+  const sortedDates = Array.from(groupedEvents.keys()).sort()
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        console.log('Tab became visible, restarting auto-refresh')
-        if (intervalId) {
-          clearInterval(intervalId)
-        }
-        startAutoRefresh()
-      } else {
-        console.log('Tab hidden, pausing auto-refresh')
-        if (intervalId) {
-          clearInterval(intervalId)
-        }
-      }
-    }
-
-    // Start auto-refresh
-    startAutoRefresh()
-
-    // Listen for visibility changes
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-
-    return () => {
-      if (intervalId) {
-        clearInterval(intervalId)
-      }
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-    }
-  }, [refetchEvents])
-
-  // Handle hide event
-  const handleHideEvent = (eventId: string) => {
-    if (confirm('Are you sure you want to exclude this event from your timesheet?')) {
-      hideEventMutation.mutate({ eventId })
-    }
-  }
-
-  // Convert event dates from strings to Date objects
-  const events: Array<{
-    id: string
-    title: string
-    startTime: Date
-    endTime: Date
-    status: string
-    isAllDay: boolean
-    location?: string | null
-    isDeleted: boolean
-  }> = eventsData?.events.map((event: any) => ({
-    ...event,
-    startTime: new Date(event.startTime),
-    endTime: new Date(event.endTime),
-  })) || []
-
-  // Detect overlaps
-  const overlappingEvents = detectOverlappingEvents(events)
-  // Prevent overlappingEvents from being tree-shaken
-  if (overlappingEvents && false) console.log(overlappingEvents)
+  // Count uncategorized
+  const uncategorizedCount = events.filter((e: any) => !e.isCategorized && !e.isSkipped).length
 
   // Handle calendar selection save
   const handleSaveCalendarSelection = () => {
@@ -221,19 +197,64 @@ export function Events() {
     )
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Header with sync button */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Events</h1>
-          {lastSyncTime && (
-            <p className="text-sm text-gray-600 mt-1">
-              Last synced: {lastSyncTime.toLocaleTimeString()}
+  if (eventsLoading) {
+    return (
+      <div className="max-w-6xl mx-auto p-8">
+        <div className="text-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading events...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (events.length === 0) {
+    return (
+      <div className="max-w-6xl mx-auto p-8">
+        <div className="mb-8 flex justify-between items-center">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Events</h1>
+            <p className="text-gray-600 mt-2">
+              {format(dateRange.startDate, 'MMMM d')} - {format(dateRange.endDate, 'MMMM d, yyyy')}
             </p>
-          )}
+          </div>
+          <button
+            onClick={handleSync}
+            disabled={syncMutation.isPending}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 flex items-center gap-2"
+          >
+            {syncMutation.isPending ? (
+              <>
+                <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
+                Syncing...
+              </>
+            ) : (
+              '🔄 Sync Calendar'
+            )}
+          </button>
         </div>
 
+        <div className="bg-white p-12 rounded-lg border text-center">
+          <div className="text-6xl mb-4">📅</div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">No Events Found</h2>
+          <p className="text-gray-600">
+            No events found for this date range. Try syncing your calendar or selecting a different range.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="max-w-6xl mx-auto p-8">
+      {/* Header */}
+      <div className="mb-8 flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Events</h1>
+          <p className="text-gray-600 mt-2">
+            {format(dateRange.startDate, 'MMMM d')} - {format(dateRange.endDate, 'MMMM d, yyyy')}
+          </p>
+        </div>
         <button
           onClick={handleSync}
           disabled={syncMutation.isPending}
@@ -245,50 +266,163 @@ export function Events() {
               Syncing...
             </>
           ) : (
-            <>
-              🔄 Sync Calendar
-            </>
+            '🔄 Sync Calendar'
           )}
         </button>
       </div>
 
-      {/* Sync error */}
-      {syncMutation.error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-          Failed to sync: {syncMutation.error.message}
+      {/* Date Range Selector */}
+      <div className="mb-8">
+        <DateRangeSelector selectedRange={dateRange} onRangeChange={setDateRange} />
+      </div>
+
+      {/* Status Info */}
+      {uncategorizedCount > 0 && (
+        <div className="mb-8 bg-amber-50 border border-amber-200 rounded-lg p-4">
+          <p className="text-sm text-amber-800">
+            <strong>{uncategorizedCount}</strong> event{uncategorizedCount !== 1 ? 's' : ''} need{uncategorizedCount === 1 ? 's' : ''} categorization
+          </p>
         </div>
       )}
 
-      {/* Date range selector */}
-      <DateRangeSelector selectedRange={dateRange} onRangeChange={setDateRange} />
+      {/* Events List */}
+      <div className="space-y-6">
+        {sortedDates.map((dateKey) => {
+          const dayEvents = groupedEvents.get(dateKey)!
+          const date = new Date(dateKey)
+          const dayName = format(date, 'EEEE')
+          const dateStr = format(date, 'MMMM d, yyyy')
 
-      {/* Events loading */}
-      {eventsLoading && (
-        <div className="flex justify-center items-center py-12">
-          <div className="animate-spin h-12 w-12 border-4 border-blue-600 border-t-transparent rounded-full" />
+          return (
+            <div key={dateKey} className="bg-white rounded-lg border">
+              {/* Day Header */}
+              <div className="px-6 py-4 border-b bg-gray-50">
+                <h3 className="text-lg font-semibold text-gray-900">{dayName}</h3>
+                <p className="text-sm text-gray-600">{dateStr}</p>
+              </div>
+
+              {/* Events */}
+              <div className="divide-y">
+                {dayEvents.map((event: any) => {
+                  const duration = Math.round(
+                    (new Date(event.endTime).getTime() - new Date(event.startTime).getTime()) /
+                      60000
+                  )
+
+                  const isCategorized = event.isCategorized
+                  const isSkipped = event.isSkipped
+
+                  return (
+                    <div
+                      key={event.id}
+                      className={`px-6 py-4 transition-all ${
+                        isCategorized ? 'bg-green-50 border-l-4 border-l-green-500' : ''
+                      } ${isSkipped ? 'bg-gray-100 opacity-60' : ''}`}
+                    >
+                      <div className="flex items-start gap-4">
+                        {/* Status Indicator */}
+                        <div className="flex-shrink-0 w-6 pt-1">
+                          {isCategorized && (
+                            <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                              <svg
+                                className="w-4 h-4 text-white"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={3}
+                                  d="M5 13l4 4L19 7"
+                                />
+                              </svg>
+                            </div>
+                          )}
+                          {isSkipped && (
+                            <div className="w-6 h-6 bg-gray-400 rounded-full flex items-center justify-center">
+                              <span className="text-white text-xs">⏭</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Time */}
+                        <div className="flex-shrink-0 w-32">
+                          <div className="text-sm font-medium text-gray-900">
+                            {formatTime(new Date(event.startTime))} -{' '}
+                            {formatTime(new Date(event.endTime))}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            {formatDuration(duration)}
+                          </div>
+                        </div>
+
+                        {/* Event Details */}
+                        <div className="flex-1">
+                          <h4 className="text-base font-medium text-gray-900">{event.title}</h4>
+                          {event.location && (
+                            <p className="text-sm text-gray-500 mt-1">{event.location}</p>
+                          )}
+                          {isCategorized && event.projectName && (
+                            <div className="mt-1">
+                              <span className="inline-block px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded">
+                                {event.projectName}
+                              </span>
+                            </div>
+                          )}
+                          {isSkipped && (
+                            <div className="mt-1">
+                              <span className="inline-block px-2 py-1 text-xs font-medium bg-gray-200 text-gray-600 rounded">
+                                Skipped
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Project Picker or Status */}
+                        {!isSkipped && (
+                          <div className="flex-shrink-0 w-64">
+                            <ProjectPicker
+                              value={undefined}
+                              onSelect={(projectId) => handleProjectSelect(event.id, projectId)}
+                              placeholder={isCategorized ? "Change project..." : "Select project..."}
+                            />
+                          </div>
+                        )}
+
+                        {/* Skip Button */}
+                        {!isCategorized && !isSkipped && (
+                          <button
+                            onClick={() => handleSkip(event.id)}
+                            disabled={skipEventMutation.isPending}
+                            className="flex-shrink-0 px-4 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg border disabled:opacity-50"
+                          >
+                            Skip
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Auto-save status */}
+      {categorizeSingleMutation.isPending && (
+        <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <p className="text-sm text-blue-600">Saving...</p>
         </div>
       )}
 
-      {/* Events error */}
-      {eventsError && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-          Failed to load events: {eventsError.message}
+      {/* Error Message */}
+      {categorizeSingleMutation.isError && (
+        <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-sm text-red-600">{categorizeSingleMutation.error.message}</p>
         </div>
       )}
-
-      {/* Events list */}
-      {!eventsLoading && !eventsError && (
-        <EventList
-          events={events}
-          onHideEvent={handleHideEvent}
-          detectOverlaps={detectOverlappingEvents}
-        />
-      )}
-
-      {/* Auto-refresh indicator */}
-      <p className="text-xs text-gray-500 text-center">
-        Events auto-refresh every 15 minutes while this tab is active
-      </p>
     </div>
   )
 }
