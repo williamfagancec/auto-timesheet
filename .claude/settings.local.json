@@ -29,7 +29,7 @@
       "Bash(pnpm:*)",
       "Bash(curl:*)",
       "Bash(npm run build:*)",
-      "Bash(/opt/homebrew/bin/pnpm exec tsx:*)"
+      "Bash(pnpm exec tsx:*)"
     ],
     "deny": [],
     "ask": []
