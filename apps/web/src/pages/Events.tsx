@@ -47,26 +47,17 @@ export function Events() {
     }
   }, [calendarStatus])
 
-  // Query ALL events for the date range (not just uncategorized)
+  // Query ALL calendar events with categorization status
   const {
-    data: eventsData = [],
+    data: events = [],
     isLoading: eventsLoading,
     refetch: refetchEvents,
-  } = trpc.timesheet.getEntries.useQuery({
+  } = trpc.calendar.getEventsWithStatus.useQuery({
     startDate: dateRange.startDate.toISOString(),
     endDate: dateRange.endDate.toISOString(),
   })
 
-  // Convert timesheet entries to event format with categorization info
-  const events = eventsData
-    .filter((entry: any) => entry.event) // Only entries with events
-    .map((entry: any) => ({
-      ...entry.event,
-      isCategorized: !!entry.projectId,
-      isSkipped: entry.isSkipped,
-      projectName: entry.project?.name,
-      projectId: entry.projectId,
-    }))
+  // No mapping needed - events already have correct shape from the API
 
   // Skip event mutation
   const skipEventMutation = trpc.timesheet.skipEvent.useMutation({

@@ -184,6 +184,53 @@ export const calendarRouter = router({
     }),
 
   /**
+   * Get calendar events with their categorization status
+   * Shows all calendar events for date range with timesheet entry info
+   */
+  getEventsWithStatus: protectedProcedure
+    .input(
+      z.object({
+        startDate: z.string().datetime(),
+        endDate: z.string().datetime(),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const startDate = new Date(input.startDate)
+      const endDate = new Date(input.endDate)
+
+      const events = await prisma.calendarEvent.findMany({
+        where: {
+          userId: ctx.user.id,
+          isDeleted: false,
+          startTime: {
+            gte: startDate,
+          },
+          endTime: {
+            lt: endDate,
+          },
+        },
+        include: {
+          entry: {
+            include: {
+              project: true,
+            },
+          },
+        },
+        orderBy: {
+          startTime: 'asc',
+        },
+      })
+
+      return events.map((event) => ({
+        ...event,
+        isCategorized: event.entry?.projectId !== null && !event.entry?.isSkipped,
+        isSkipped: event.entry?.isSkipped || false,
+        projectName: event.entry?.project?.name,
+        projectId: event.entry?.projectId,
+      }))
+    }),
+
+  /**
    * Soft delete (hide) an event from timesheet
    */
   hideEvent: protectedProcedure
