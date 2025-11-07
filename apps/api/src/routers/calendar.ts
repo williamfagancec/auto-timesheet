@@ -223,7 +223,7 @@ export const calendarRouter = router({
 
       return events.map((event) => ({
         ...event,
-        isCategorized: event.entry?.projectId !== null && !event.entry?.isSkipped,
+        isCategorized: event.entry?.projectId != null && !event.entry?.isSkipped,
         isSkipped: event.entry?.isSkipped || false,
         projectName: event.entry?.project?.name,
         projectId: event.entry?.projectId,

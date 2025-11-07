@@ -41,14 +41,14 @@ export const timesheetRouter = router({
         },
       })
 
-      // Get all active projects for the user
+      // Get all active projects for the user (in order they were created)
       const allProjects = await prisma.project.findMany({
         where: {
           userId: ctx.user.id,
           isArchived: false,
         },
         orderBy: {
-          lastUsedAt: 'desc',
+          createdAt: 'asc',
         },
       })
 
