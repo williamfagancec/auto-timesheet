@@ -344,20 +344,56 @@ const timeMax = getUserLocalNow(userTimezone)
 // Sydney 12:00 PM = correct cutoff, includes afternoon events
 ```
 
-**Status**: ✅ **FULLY WORKING**
+**Status**: ✅ **FULLY WORKING** (as of 2025-11-06 PM)
 - All new users automatically get correct timezone (no manual database updates)
 - Existing users: timezone updates on next OAuth login
 - Sydney user now syncs events correctly with local time
 - Solution works for all timezones globally
 
-**Known Issues**:
+**Bug Fix (2025-11-06 PM)**: Fixed critical bug in `getUserLocalNow()` function
+- **Problem**: Function was treating local time components as UTC, creating a future timestamp
+- **Symptom**: Sydney user (UTC+11) at 9:36 AM Thursday local time would get `2025-11-07T09:36:00Z` (9:36 AM UTC) instead of actual UTC time `2025-11-06T22:36:00Z` (10:36 PM Wednesday UTC), causing events to be incorrectly excluded
+- **Root Cause**: Line 355 created `new Date("2025-11-07T09:36:00Z")` treating Sydney local time as UTC (11 hours in the future)
+- **Fix**: Changed function to return `new Date()` (actual current UTC time) instead of converting local time components
+- **File**: `apps/api/src/services/calendar-sync.ts:329-362`
+- **Rationale**: Calendar events are stored in UTC (Prisma DateTime), so filtering must compare against actual UTC time, not converted local time
+- **Test**: Run `npx tsx apps/api/debug-timezone.ts [userId]` to verify UTC and User Local times match
 
-⚠️ **OAuth Token Refresh Failures** (High Priority)
-- **Problem**: Google OAuth refresh tokens occasionally expire or become invalid
-- **Current Workaround**: User must log out and log back in with Google OAuth
-- **User Impact**: Events stop syncing silently - no UI indication of auth failure
-- **TODO**: Add UI notification, automatic re-auth flow, token health check endpoint
-- **File**: `apps/api/src/auth/token-refresh.ts:29`
+### ✅ OAuth Token Refresh & Session Management Fixes (2025-11-07)
+
+**Problem 1: Refresh Token Loss on Re-authentication**
+- **Root Cause**: OAuth callback unconditionally updated `refreshToken` field, but Google only returns refresh tokens on first consent or when `prompt=consent` is forced
+- **Symptom**: Subsequent OAuth logins would set `refreshToken: undefined`, deleting the stored refresh token
+- **Impact**: Token refresh would fail with "Missing or invalid 'refresh_token' field", requiring manual re-login
+- **File**: `apps/api/src/routers/auth.ts:297-305`
+
+**Solution**:
+```typescript
+update: {
+  accessToken: encryptedAccessToken,
+  expiresAt: tokens.accessTokenExpiresAt(),
+  timezone,
+  // CRITICAL: Only update refresh token if Google provided a new one
+  // Otherwise, preserve the existing refresh token in the database
+  ...(encryptedRefreshToken && { refreshToken: encryptedRefreshToken }),
+}
+```
+
+**Problem 2: Silent Token Refresh Failures**
+- **Root Cause**: When refresh tokens are revoked (user revokes access, token expires naturally), sync silently fails with no user notification
+- **User Impact**: Calendar stops syncing but user has no indication auth failed
+- **File**: `apps/api/src/auth/token-refresh.ts:120-138`
+
+**Solution**: Auto-logout on refresh failure
+- When `REFRESH_TOKEN_REVOKED` error occurs, invalidate all user sessions via `prisma.session.deleteMany()`
+- Next API request will detect missing session and redirect to login
+- User sees clear error: "SESSION_INVALIDATED: Your Google Calendar connection has expired. Please log in again."
+- Simple UX: forces immediate re-authentication without complex re-auth flows
+
+**Status**: ✅ **FULLY FIXED** (as of 2025-11-07)
+- Refresh tokens now preserved across multiple OAuth logins
+- Token refresh failures automatically log user out
+- Next step: Add frontend error handling to show "Session expired" message on login page
 
 ### ✅ Epic 3: Project Creation & Organization - Phase 1 Complete (2025-11-05)
 

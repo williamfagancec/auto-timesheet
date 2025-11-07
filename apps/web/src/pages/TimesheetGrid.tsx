@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { format, startOfWeek, endOfWeek, addWeeks, subWeeks } from 'date-fns'
 import { trpc } from '../lib/trpc'
 
@@ -19,6 +19,20 @@ interface ActiveCell {
   day: DayKey
 }
 
+// Helper to format hours to display .25, .5, .75 instead of .3, .8
+const formatHours = (hours: number): string => {
+  if (hours === 0) return ''
+  // Round to nearest 0.25
+  const rounded = Math.round(hours * 4) / 4
+  // Format to show proper quarters
+  if (Number.isInteger(rounded)) return rounded.toString()
+  const decimal = rounded - Math.floor(rounded)
+  if (decimal === 0.25) return `${Math.floor(rounded)}.25`
+  if (decimal === 0.5) return `${Math.floor(rounded)}.5`
+  if (decimal === 0.75) return `${Math.floor(rounded)}.75`
+  return rounded.toString()
+}
+
 export function TimesheetGrid() {
   // Default to current week (Monday start)
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }))
@@ -27,6 +41,12 @@ export function TimesheetGrid() {
   // Active cell for editing and notes
   const [activeCell, setActiveCell] = useState<ActiveCell | null>(null)
   const [notes, setNotes] = useState<string>('')
+
+  // Pending input value (for validation on blur/enter)
+  const [pendingValue, setPendingValue] = useState<{ [key: string]: string }>({})
+
+  // Ref for notes container to handle clicks outside
+  const notesRef = useRef<HTMLDivElement>(null)
 
   // Fetch weekly grid data
   const { data: gridData, isLoading, refetch } = trpc.timesheet.getWeeklyGrid.useQuery({
@@ -53,25 +73,54 @@ export function TimesheetGrid() {
     setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))
   }
 
+  // Handle clicks outside notes to close it
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (notesRef.current && !notesRef.current.contains(event.target as Node)) {
+        // Check if click was on a cell
+        const target = event.target as HTMLElement
+        const isCell = target.closest('td')
+        if (!isCell || !activeCell) {
+          setActiveCell(null)
+          setNotes('')
+        }
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [activeCell])
+
   // Handle cell click
   const handleCellClick = (projectId: string, day: DayKey) => {
-    if (activeCell?.projectId === projectId && activeCell?.day === day) {
-      // Clicking the same cell - deactivate
-      setActiveCell(null)
-      setNotes('')
-    } else {
-      // Activate new cell
-      setActiveCell({ projectId, day })
+    // Activate cell and load notes
+    setActiveCell({ projectId, day })
 
-      // Load existing notes
-      const project = gridData?.projects.find((p) => p.id === projectId)
-      const existingNotes = project?.notes[day] || ''
-      setNotes(existingNotes)
-    }
+    // Load existing notes
+    const project = gridData?.projects.find((p) => p.id === projectId)
+    const existingNotes = project?.notes[day] || ''
+    setNotes(existingNotes)
   }
 
-  // Handle cell value change
-  const handleCellChange = (projectId: string, day: DayKey, value: string) => {
+  // Handle input change (just update local state, don't save yet)
+  const handleInputChange = (projectId: string, day: DayKey, value: string) => {
+    const key = `${projectId}-${day}`
+    setPendingValue((prev) => ({ ...prev, [key]: value }))
+  }
+
+  // Handle blur or enter key (validate and save)
+  const handleInputBlur = (projectId: string, day: DayKey, value: string) => {
+    if (!value) {
+      // Clear pending value
+      const key = `${projectId}-${day}`
+      setPendingValue((prev) => {
+        const newState = { ...prev }
+        delete newState[key]
+        return newState
+      })
+      return
+    }
+
     // Parse hours (allow decimal values in 0.25 increments)
     const hours = parseFloat(value) || 0
 
@@ -96,6 +145,22 @@ export function TimesheetGrid() {
       hours: roundedHours,
       notes: activeCell?.projectId === projectId && activeCell?.day === day ? notes : undefined,
     })
+
+    // Clear pending value
+    const key = `${projectId}-${day}`
+    setPendingValue((prev) => {
+      const newState = { ...prev }
+      delete newState[key]
+      return newState
+    })
+  }
+
+  // Handle enter key
+  const handleKeyDown = (e: React.KeyboardEvent, projectId: string, day: DayKey, value: string) => {
+    if (e.key === 'Enter') {
+      handleInputBlur(projectId, day, value)
+      ;(e.target as HTMLInputElement).blur()
+    }
   }
 
   // Handle notes save
@@ -219,6 +284,8 @@ export function TimesheetGrid() {
                 {DAY_NAMES.map((day) => {
                   const hours = project.dailyHours[day.key]
                   const isActive = activeCell?.projectId === project.id && activeCell?.day === day.key
+                  const key = `${project.id}-${day.key}`
+                  const displayValue = pendingValue[key] !== undefined ? pendingValue[key] : formatHours(hours)
 
                   return (
                     <td
@@ -235,25 +302,21 @@ export function TimesheetGrid() {
                         step="0.25"
                         min="0"
                         max="24"
-                        value={
-                          hours > 0
-                          ? (Number.isInteger(hours)
-                            ? hours.toString()
-                            : hours.toFixed(2).replace(/\.?0+$/, ''))
-                          : ''
-                        }
-                        onChange={(e) => handleCellChange(project.id, day.key, e.target.value)}
+                        value={displayValue}
+                        onChange={(e) => handleInputChange(project.id, day.key, e.target.value)}
+                        onBlur={(e) => handleInputBlur(project.id, day.key, e.target.value)}
+                        onKeyDown={(e) => handleKeyDown(e, project.id, day.key, e.currentTarget.value)}
                         onClick={(e) => e.stopPropagation()}
                         className={`w-full text-center bg-transparent outline-none ${
                           hours > 0 ? 'font-medium text-gray-900' : 'text-gray-400'
-                        }`}
+                        } [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
                         placeholder="0.0"
                       />
                     </td>
                   )
                 })}
                 <td className="text-center p-4 font-medium text-gray-900">
-                  {project.weeklyTotal.toFixed(1)}
+                  {formatHours(project.weeklyTotal)}
                 </td>
               </tr>
             ))}
@@ -272,7 +335,7 @@ export function TimesheetGrid() {
                     className="text-center p-4 border-r"
                   >
                     <div className={isUnderTarget ? 'text-red-600' : 'text-gray-900'}>
-                      {total.toFixed(1)}
+                      {formatHours(total)}
                     </div>
                     {isUnderTarget && (
                       <div className="text-red-500 text-xs mt-1">▲</div>
@@ -281,23 +344,24 @@ export function TimesheetGrid() {
                 )
               })}
               <td className="text-center p-4 text-gray-900">
-                {Object.values(gridData.dailyTotals).reduce((sum, val) => sum + val, 0).toFixed(1)}
+                {formatHours(Object.values(gridData.dailyTotals).reduce((sum, val) => sum + val, 0))}
               </td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      {/* Notes Field (shown when cell is active) */}
+      {/* Notes Field (shown as dropdown when cell is active) */}
       {activeCell && (
-        <div className="mt-4 bg-gray-50 p-4 rounded-lg border">
+        <div ref={notesRef} className="mt-4 bg-white p-4 rounded-lg border shadow-lg">
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Notes for {gridData.projects.find((p) => p.id === activeCell.projectId)?.name} - {DAY_NAMES.find((d) => d.key === activeCell.day)?.short}
           </label>
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="Enter note"
+            onClick={(e) => e.stopPropagation()}
+            placeholder="Enter notes for this entry..."
             className="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             rows={3}
           />
@@ -321,14 +385,6 @@ export function TimesheetGrid() {
           </div>
         </div>
       )}
-
-      {/* Info Box */}
-      <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <p className="text-sm text-gray-700">
-          <strong>Tip:</strong> Click a cell to add hours (in 15-minute increments: 0.25, 0.5, 0.75, 1.0, etc.).
-          Click the cell again to add notes. Hours are automatically saved when you change the value.
-        </p>
-      </div>
     </div>
   )
 }

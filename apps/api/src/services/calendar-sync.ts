@@ -37,19 +37,18 @@ interface GoogleCalendarEventsResponse {
 
 /**
  * Fetch events from a specific Google Calendar within a date range
- * Only fetches PAST events (endTime < now)
+ * Only fetches PAST events (endTime < timeMax, where timeMax is user's local "now")
  */
 export async function fetchPastEvents(
   userId: string,
   calendarId: string,
   timeMin: Date,
-  timeMax: Date = new Date() // Default to now
+  timeMax: Date // User's local "now" - no default, caller must provide
 ): Promise<GoogleCalendarEvent[]> {
   const accessToken = await getValidAccessToken(userId, 'google')
-  const now = new Date()
 
-  // Ensure we don't fetch future events
-  const effectiveTimeMax = timeMax > now ? now : timeMax
+  // Use the provided timeMax directly - caller is responsible for timezone handling
+  const effectiveTimeMax = timeMax
 
   const params = new URLSearchParams({
     timeMin: timeMin.toISOString(),
@@ -90,13 +89,17 @@ export async function fetchPastEvents(
 }
 
 /**
- * Filter events based on response status
- * Exclude: declined, cancelled
- * Include: confirmed, tentative, needsAction
+ * Filter events based on response status and time
+ * Exclude: declined, cancelled, future events (endTime >= timeMax)
+ * Include: confirmed, tentative, needsAction (if endTime < timeMax)
+ *
+ * @param events - Array of Google Calendar events
+ * @param timeMax - User's local "now" (events ending after this are excluded)
  */
-export function filterEvents(events: GoogleCalendarEvent[]): GoogleCalendarEvent[] {
-  const now = new Date()
-
+export function filterEvents(
+  events: GoogleCalendarEvent[],
+  timeMax: Date
+): GoogleCalendarEvent[] {
   return events.filter((event) => {
     // Skip cancelled events
     if (event.status === 'cancelled') {
@@ -109,8 +112,8 @@ export function filterEvents(events: GoogleCalendarEvent[]): GoogleCalendarEvent
 
     const endTime = new Date(endTimeStr)
 
-    // Only include past events (ended before now)
-    if (endTime >= now) {
+    // Only include past events (ended before user's local "now")
+    if (endTime >= timeMax) {
       return false
     }
 
@@ -312,16 +315,23 @@ export function getStartOfCurrentWeek(): Date {
 }
 
 /**
- * Get the current time in user's local timezone
- * This is used to determine which events have already ended
+ * Get the current UTC time for calendar event filtering
+ *
+ * IMPORTANT: Calendar events are stored in UTC (Prisma DateTime field).
+ * To determine which events have ended, we compare event.endTime (UTC) with current UTC time.
+ *
+ * The timezone parameter is for logging purposes only - to show the user's local time
+ * alongside UTC time for debugging.
+ *
+ * Previous implementation incorrectly created a future UTC timestamp by treating
+ * local time components as UTC (e.g., Sydney 9:36 AM became 9:36 AM UTC instead of current UTC).
  */
 export function getUserLocalNow(timezone: string): Date {
   try {
     // Get current UTC time
     const now = new Date()
 
-    // Convert to user's timezone using Intl.DateTimeFormat
-    // This gives us the local time components
+    // For debugging: show user's local time alongside UTC
     const formatter = new Intl.DateTimeFormat('en-US', {
       timeZone: timezone,
       year: 'numeric',
@@ -331,34 +341,22 @@ export function getUserLocalNow(timezone: string): Date {
       minute: '2-digit',
       second: '2-digit',
       hour12: false,
-      timeZoneName: 'shortOffset',
     })
 
     const parts = formatter.formatToParts(now)
     const getValue = (type: string) => parts.find(p => p.type === type)?.value || '0'
-    const offsetPart = parts.find(p => p.type === 'timeZoneName')?.value ?? 'GMT+00:00'
-    const offsetMatch = offsetPart.match(/GMT([+-]\d{2})(?::?(\d{2}))?/)
-    const offset = offsetMatch ? `${offsetMatch[1]}:${offsetMatch[2] ?? '00'}` : '+00:00'
 
+    const localTimeStr = `${getValue('year')}-${getValue('month')}-${getValue('day')}T${getValue('hour')}:${getValue('minute')}:${getValue('second')}`
 
-    // Create a date string in ISO format for the user's local time
-    const year = getValue('year')
-    const month = getValue('month')
-    const day = getValue('day')
-    const hour = getValue('hour')
-    const minute = getValue('minute')
-    const second = getValue('second')
+    console.log(`[Calendar Sync Timezone]`)
+    console.log(`  Current UTC time:  ${now.toISOString()}`)
+    console.log(`  User timezone:     ${timezone}`)
+    console.log(`  User local time:   ${localTimeStr}`)
 
-    // Create a new Date object representing the local time as if it were UTC
-    // This gives us a UTC timestamp that represents the user's current local time
-    const localTime = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}${offset}`)
-
-    console.log(`Current UTC time: ${now.toISOString()}`)
-    console.log(`User's local time (${timezone}): ${localTime.toISOString()}`)
-
-    return localTime
+    // Return actual UTC time (not converted)
+    return now
   } catch (error) {
-    console.error(`Failed to convert timezone ${timezone}, falling back to UTC:`, error)
+    console.error(`Failed to format timezone ${timezone}, using UTC:`, error)
     return new Date()
   }
 }
@@ -402,9 +400,9 @@ export async function syncUserEvents(userId: string): Promise<{
     try {
       console.log(`Fetching events from calendar ${calendarId}`)
       const events = await fetchPastEvents(userId, calendarId, timeMin, timeMax)
-      const filteredEvents = filterEvents(events)
+      const filteredEvents = filterEvents(events, timeMax)
 
-      console.log(`Fetched ${events.length} events, ${filteredEvents.length} after filtering`)
+      console.log(`Fetched ${events.length} events, ${filteredEvents.length} after filtering (timeMax: ${timeMax.toISOString()})`)
 
       const { created, updated } = await saveEventsToDatabase(userId, calendarId, filteredEvents)
 

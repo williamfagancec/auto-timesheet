@@ -119,6 +119,20 @@ export async function getValidAccessToken(
       accessToken = newTokens.accessToken
     } catch (refreshError) {
       console.error('Token refresh failed for user', userId, refreshError)
+
+      // If refresh token is revoked or invalid, invalidate all user sessions
+      // This forces the user to log in again to re-authenticate with Google
+      if (refreshError instanceof Error &&
+          refreshError.message.includes('REFRESH_TOKEN_REVOKED')) {
+        console.log(`Invalidating all sessions for user ${userId} due to revoked refresh token`)
+        try {
+          await prisma.session.deleteMany({ where: { userId } })
+        } catch (sessionDeleteError) {
+          console.error('Failed to delete sessions:', sessionDeleteError)
+        }
+        throw new Error('SESSION_INVALIDATED: Your Google Calendar connection has expired. Please log in again.')
+      }
+
       // Re-throw with the specific error from refreshGoogleToken
       throw refreshError
     }

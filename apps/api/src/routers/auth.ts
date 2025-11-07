@@ -296,9 +296,12 @@ export const authRouter = router({
           },
           update: {
             accessToken: encryptedAccessToken,
-            refreshToken: encryptedRefreshToken,
             expiresAt: tokens.accessTokenExpiresAt(),
             timezone,
+            // CRITICAL: Only update refresh token if Google provided a new one
+            // Otherwise, preserve the existing refresh token in the database
+            // (Google only returns refresh tokens on first consent or when prompt=consent)
+            ...(encryptedRefreshToken && { refreshToken: encryptedRefreshToken }),
           },
         })
 
