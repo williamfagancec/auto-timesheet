@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterAll } from 'vitest'
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, CategoryRule, Project } from '@prisma/client'
 import {
   getSuggestionsForEvent,
   // learnFromCategorization, // TODO: Will be used in Phase 5 tests
@@ -16,7 +16,12 @@ import {
   extractTitleKeywords,
   extractAttendeePatterns,
   extractPatternsFromEvent,
+  calculateRuleConfidence,
+  calculateCombinedConfidence,
+  aggregateByProject,
   type CalendarEventInput,
+  type ScoredRule,
+  type ProjectSuggestion,
 } from '../ai-categorization'
 
 // Test database setup
@@ -573,20 +578,460 @@ describe('Phase 2: Pattern Extraction', () => {
 })
 
 // =============================================================================
-// PHASE 3: CONFIDENCE CALCULATION TESTS (To be implemented)
+// PHASE 3: CONFIDENCE CALCULATION TESTS
 // =============================================================================
 
-describe('Confidence Calculation', () => {
-  describe.todo('calculateRuleConfidence', () => {
-    it.todo('should calculate confidence with accuracy boost')
-    it.todo('should return base confidence for new rules')
-    it.todo('should apply learning accuracy weight from config')
+describe('Phase 3: Confidence Calculation', () => {
+  describe('calculateRuleConfidence', () => {
+    // Helper to create a mock rule
+    const createMockRule = (overrides: Partial<CategoryRule> = {}): CategoryRule => ({
+      id: 'rule-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+      ruleType: 'TITLE_KEYWORD',
+      condition: 'standup',
+      confidenceScore: 0.7,
+      accuracy: 0.5,
+      matchCount: 10,
+      totalSuggestions: 20,
+      lastMatchedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...overrides,
+    })
+
+    it('should calculate base confidence from rule type weight', () => {
+      const rule = createMockRule({
+        ruleType: 'RECURRING_EVENT_ID',
+        confidenceScore: 1.0,
+        accuracy: 0.0, // No accuracy boost
+        lastMatchedAt: null, // No recency/staleness
+      })
+
+      const confidence = calculateRuleConfidence(rule)
+
+      // Base: 1.0 (RECURRING_EVENT_ID weight) × 1.0 (confidenceScore) × 1.0 (1 + 0.3 × 0) = 1.0
+      expect(confidence).toBe(1.0)
+    })
+
+    it('should scale by confidenceScore', () => {
+      const rule = createMockRule({
+        ruleType: 'TITLE_KEYWORD', // Weight: 0.5
+        confidenceScore: 0.6,
+        accuracy: 0.0, // No accuracy boost
+        lastMatchedAt: null,
+      })
+
+      const confidence = calculateRuleConfidence(rule)
+
+      // Base: 0.5 × 0.6 × 1.0 = 0.3
+      expect(confidence).toBe(0.3)
+    })
+
+    // TEST 1: Confidence boosting for accurate rules (90% accuracy)
+    it('should boost confidence for highly accurate rules (90% accuracy)', () => {
+      const rule = createMockRule({
+        ruleType: 'ATTENDEE_EMAIL', // Weight: 0.9
+        confidenceScore: 0.8,
+        accuracy: 0.9, // 90% accuracy
+        lastMatchedAt: null,
+      })
+
+      const confidence = calculateRuleConfidence(rule)
+
+      // Step 1: 0.9 (weight)
+      // Step 2: 0.9 × 0.8 = 0.72
+      // Step 3: 0.72 × (1 + 0.3 × 0.9) = 0.72 × 1.27 = 0.9144
+      expect(confidence).toBeCloseTo(0.9144, 4)
+    })
+
+    // TEST 2: Confidence penalty for inaccurate rules (20% accuracy)
+    it('should apply minimal boost for inaccurate rules (20% accuracy)', () => {
+      const rule = createMockRule({
+        ruleType: 'TITLE_KEYWORD', // Weight: 0.5
+        confidenceScore: 0.6,
+        accuracy: 0.2, // 20% accuracy (poor performance)
+        lastMatchedAt: null,
+      })
+
+      const confidence = calculateRuleConfidence(rule)
+
+      // Step 1: 0.5 (weight)
+      // Step 2: 0.5 × 0.6 = 0.3
+      // Step 3: 0.3 × (1 + 0.3 × 0.2) = 0.3 × 1.06 = 0.318
+      expect(confidence).toBeCloseTo(0.318, 3)
+    })
+
+    // TEST 3: Recency boost (matches within 7 days)
+    it('should apply +10% recency boost for recent matches (within 7 days)', () => {
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+
+      const rule = createMockRule({
+        ruleType: 'ATTENDEE_DOMAIN', // Weight: 0.7
+        confidenceScore: 0.8,
+        accuracy: 1.0,
+        lastMatchedAt: yesterday, // Matched yesterday
+      })
+
+      const confidence = calculateRuleConfidence(rule)
+
+      // Step 1: 0.7 (weight)
+      // Step 2: 0.7 × 0.8 = 0.56
+      // Step 3: 0.56 × (1 + 0.3 × 1.0) = 0.56 × 1.3 = 0.728
+      // Step 4: 0.728 × (1 + 0.1) = 0.728 × 1.1 = 0.8008
+      expect(confidence).toBeCloseTo(0.8008, 4)
+    })
+
+    it('should NOT apply recency boost for matches older than 7 days', () => {
+      const tenDaysAgo = new Date()
+      tenDaysAgo.setDate(tenDaysAgo.getDate() - 10)
+
+      const rule = createMockRule({
+        ruleType: 'ATTENDEE_DOMAIN', // Weight: 0.7
+        confidenceScore: 0.8,
+        accuracy: 1.0,
+        lastMatchedAt: tenDaysAgo,
+      })
+
+      const confidence = calculateRuleConfidence(rule)
+
+      // No recency boost (>7 days)
+      // But also no stale penalty (<30 days)
+      // Result: 0.7 × 0.8 × 1.3 = 0.728
+      expect(confidence).toBeCloseTo(0.728, 3)
+    })
+
+    it('should apply -10% stale penalty for rules unused 30+ days', () => {
+      const fortyDaysAgo = new Date()
+      fortyDaysAgo.setDate(fortyDaysAgo.getDate() - 40)
+
+      const rule = createMockRule({
+        ruleType: 'TITLE_KEYWORD', // Weight: 0.5
+        confidenceScore: 0.6,
+        accuracy: 0.667,
+        lastMatchedAt: fortyDaysAgo, // Stale (40 days)
+      })
+
+      const confidence = calculateRuleConfidence(rule)
+
+      // Step 1: 0.5 (weight)
+      // Step 2: 0.5 × 0.6 = 0.3
+      // Step 3: 0.3 × (1 + 0.3 × 0.667) = 0.3 × 1.2001 = 0.36003
+      // Step 4: (no recency bonus)
+      // Step 5: 0.36003 × (1 - 0.1) = 0.36003 × 0.9 = 0.324027
+      expect(confidence).toBeCloseTo(0.324, 3)
+    })
+
+    it('should NOT penalize brand new rules (lastMatchedAt = null)', () => {
+      const rule = createMockRule({
+        ruleType: 'TITLE_KEYWORD',
+        confidenceScore: 0.5,
+        accuracy: 0.0,
+        lastMatchedAt: null, // Never matched (brand new rule)
+      })
+
+      const confidence = calculateRuleConfidence(rule)
+
+      // No penalty for new rules
+      // 0.5 × 0.5 × 1.0 = 0.25
+      expect(confidence).toBe(0.25)
+    })
+
+    it('should apply both recency boost and accuracy boost', () => {
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+
+      const rule = createMockRule({
+        ruleType: 'RECURRING_EVENT_ID', // Weight: 1.0
+        confidenceScore: 0.9,
+        accuracy: 1.0, // Perfect accuracy
+        lastMatchedAt: yesterday, // Recent match
+      })
+
+      const confidence = calculateRuleConfidence(rule)
+
+      // Step 1: 1.0 (weight)
+      // Step 2: 1.0 × 0.9 = 0.9
+      // Step 3: 0.9 × (1 + 0.3 × 1.0) = 0.9 × 1.3 = 1.17
+      // Step 4: 1.17 × 1.1 = 1.287
+      // Step 6: Cap at 1.0
+      expect(confidence).toBe(1.0)
+    })
+
+    // TEST 5: Confidence capping at 100%
+    it('should cap confidence at 1.0 (100%)', () => {
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+
+      const rule = createMockRule({
+        ruleType: 'RECURRING_EVENT_ID', // Weight: 1.0
+        confidenceScore: 1.0,
+        accuracy: 1.0,
+        lastMatchedAt: yesterday,
+      })
+
+      const confidence = calculateRuleConfidence(rule)
+
+      // Without cap: 1.0 × 1.0 × 1.3 × 1.1 = 1.43
+      // With cap: 1.0
+      expect(confidence).toBe(1.0)
+      expect(confidence).toBeLessThanOrEqual(1.0)
+    })
+
+    it('should handle different rule types with correct weights', () => {
+      const baseRule = createMockRule({
+        confidenceScore: 1.0,
+        accuracy: 0.0,
+        lastMatchedAt: null,
+      })
+
+      expect(calculateRuleConfidence({ ...baseRule, ruleType: 'RECURRING_EVENT_ID' })).toBe(1.0)
+      expect(calculateRuleConfidence({ ...baseRule, ruleType: 'ATTENDEE_EMAIL' })).toBe(0.9)
+      expect(calculateRuleConfidence({ ...baseRule, ruleType: 'ATTENDEE_DOMAIN' })).toBe(0.7)
+      expect(calculateRuleConfidence({ ...baseRule, ruleType: 'CALENDAR_NAME' })).toBe(0.6)
+      expect(calculateRuleConfidence({ ...baseRule, ruleType: 'TITLE_KEYWORD' })).toBe(0.5)
+    })
   })
 
-  describe.todo('calculateCombinedConfidence', () => {
-    it.todo('should boost confidence when multiple rules match')
-    it.todo('should return single confidence for one rule')
-    it.todo('should handle edge case of zero confidences')
+  describe('calculateCombinedConfidence', () => {
+    it('should return 0.0 for empty array', () => {
+      const result = calculateCombinedConfidence([])
+      expect(result).toBe(0.0)
+    })
+
+    it('should return same value for single confidence', () => {
+      const result = calculateCombinedConfidence([0.7])
+      expect(result).toBe(0.7)
+    })
+
+    // TEST 4: Score aggregation when multiple rules suggest same project
+    it('should combine multiple confidences using noisy-OR formula', () => {
+      const result = calculateCombinedConfidence([0.8, 0.6])
+
+      // 1 - ((1 - 0.8) × (1 - 0.6))
+      // = 1 - (0.2 × 0.4)
+      // = 1 - 0.08
+      // = 0.92
+      expect(result).toBe(0.92)
+    })
+
+    it('should boost confidence when multiple rules match same project', () => {
+      // Two moderate rules combine to high confidence
+      const result = calculateCombinedConfidence([0.6, 0.6])
+
+      // 1 - ((1 - 0.6) × (1 - 0.6))
+      // = 1 - (0.4 × 0.4)
+      // = 1 - 0.16
+      // = 0.84
+      expect(result).toBe(0.84)
+    })
+
+    it('should combine three confidences correctly', () => {
+      const result = calculateCombinedConfidence([0.5, 0.6, 0.7])
+
+      // 1 - ((1 - 0.5) × (1 - 0.6) × (1 - 0.7))
+      // = 1 - (0.5 × 0.4 × 0.3)
+      // = 1 - 0.06
+      // = 0.94
+      expect(result).toBe(0.94)
+    })
+
+    it('should handle all zeros', () => {
+      const result = calculateCombinedConfidence([0, 0, 0])
+
+      // 1 - ((1 - 0) × (1 - 0) × (1 - 0))
+      // = 1 - 1
+      // = 0
+      expect(result).toBe(0)
+    })
+
+    it('should handle all ones', () => {
+      const result = calculateCombinedConfidence([1, 1, 1])
+
+      // 1 - ((1 - 1) × (1 - 1) × (1 - 1))
+      // = 1 - 0
+      // = 1
+      expect(result).toBe(1)
+    })
+
+    it('should show diminishing returns with many weak rules', () => {
+      // 10 weak rules (30% each)
+      const weakRules = Array(10).fill(0.3)
+      const result = calculateCombinedConfidence(weakRules)
+
+      // Should boost significantly but not to 100%
+      expect(result).toBeGreaterThan(0.3)
+      expect(result).toBeLessThan(1.0)
+      // Actual: ~0.972
+      expect(result).toBeCloseTo(0.972, 2)
+    })
+  })
+
+  describe('aggregateByProject', () => {
+    // Helper to create mock project and rules
+    const createMockProject = (id: string): Project => ({
+      id,
+      name: `Project ${id}`,
+      userId: 'user-1',
+      isArchived: false,
+      useCount: 5,
+      lastUsedAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+
+    const createScoredRule = (
+      projectId: string,
+      confidence: number,
+      overrides: Partial<CategoryRule> = {}
+    ): ScoredRule => {
+      const project = createMockProject(projectId)
+      return {
+        rule: {
+          id: `rule-${Math.random()}`,
+          userId: 'user-1',
+          projectId,
+          ruleType: 'TITLE_KEYWORD',
+          condition: 'test',
+          confidenceScore: 0.7,
+          accuracy: 0.5,
+          matchCount: 10,
+          totalSuggestions: 20,
+          lastMatchedAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          project,
+          ...overrides,
+        },
+        confidence,
+      }
+    }
+
+    it('should return empty array for empty input', () => {
+      const result = aggregateByProject([])
+      expect(result).toEqual([])
+    })
+
+    it('should aggregate single rule for single project', () => {
+      const scoredRules = [createScoredRule('proj1', 0.8)]
+      const result = aggregateByProject(scoredRules)
+
+      expect(result).toHaveLength(1)
+      expect(result[0].projectId).toBe('proj1')
+      expect(result[0].confidence).toBe(0.8)
+      expect(result[0].matchingRules).toHaveLength(1)
+    })
+
+    it('should combine multiple rules for same project', () => {
+      const scoredRules = [
+        createScoredRule('proj1', 0.8),
+        createScoredRule('proj1', 0.6),
+      ]
+
+      const result = aggregateByProject(scoredRules)
+
+      expect(result).toHaveLength(1)
+      expect(result[0].projectId).toBe('proj1')
+      // Combined: 1 - (0.2 × 0.4) = 0.92
+      expect(result[0].confidence).toBe(0.92)
+      expect(result[0].matchingRules).toHaveLength(2)
+    })
+
+    it('should aggregate multiple projects separately', () => {
+      const scoredRules = [
+        createScoredRule('proj1', 0.8),
+        createScoredRule('proj1', 0.6),
+        createScoredRule('proj2', 0.7),
+      ]
+
+      const result = aggregateByProject(scoredRules)
+
+      expect(result).toHaveLength(2)
+      expect(result[0].projectId).toBe('proj1') // Higher confidence (0.92)
+      expect(result[0].confidence).toBe(0.92)
+      expect(result[1].projectId).toBe('proj2')
+      expect(result[1].confidence).toBe(0.7)
+    })
+
+    it('should filter projects below confidence threshold (0.5)', () => {
+      const scoredRules = [
+        createScoredRule('proj1', 0.8), // Above threshold
+        createScoredRule('proj2', 0.4), // Below threshold
+        createScoredRule('proj3', 0.3), // Below threshold
+      ]
+
+      const result = aggregateByProject(scoredRules)
+
+      expect(result).toHaveLength(1)
+      expect(result[0].projectId).toBe('proj1')
+    })
+
+    it('should sort by confidence (highest first)', () => {
+      const scoredRules = [
+        createScoredRule('proj1', 0.6),
+        createScoredRule('proj2', 0.9),
+        createScoredRule('proj3', 0.75),
+      ]
+
+      const result = aggregateByProject(scoredRules)
+
+      expect(result).toHaveLength(3)
+      expect(result[0].projectId).toBe('proj2') // 0.9
+      expect(result[1].projectId).toBe('proj3') // 0.75
+      expect(result[2].projectId).toBe('proj1') // 0.6
+    })
+
+    it('should limit to max 3 suggestions', () => {
+      const scoredRules = [
+        createScoredRule('proj1', 0.9),
+        createScoredRule('proj2', 0.85),
+        createScoredRule('proj3', 0.8),
+        createScoredRule('proj4', 0.75),
+        createScoredRule('proj5', 0.7),
+      ]
+
+      const result = aggregateByProject(scoredRules)
+
+      expect(result).toHaveLength(3)
+      expect(result.map(r => r.projectId)).toEqual(['proj1', 'proj2', 'proj3'])
+    })
+
+    it('should include project object in result', () => {
+      const scoredRules = [createScoredRule('proj1', 0.8)]
+      const result = aggregateByProject(scoredRules)
+
+      expect(result[0].project).toBeDefined()
+      expect(result[0].project.id).toBe('proj1')
+      expect(result[0].project.name).toBe('Project proj1')
+    })
+
+    it('should handle complex aggregation scenario', () => {
+      // proj1: 2 rules (0.8, 0.6) → combined: 0.92 ✓
+      // proj2: 1 rule (0.55) → 0.55 ✓
+      // proj3: 3 weak rules (0.3, 0.3, 0.3) → combined: 0.657 ✓
+      // proj4: 1 rule (0.4) → 0.4 ✗ (filtered out)
+
+      const scoredRules = [
+        createScoredRule('proj1', 0.8),
+        createScoredRule('proj1', 0.6),
+        createScoredRule('proj2', 0.55),
+        createScoredRule('proj3', 0.3),
+        createScoredRule('proj3', 0.3),
+        createScoredRule('proj3', 0.3),
+        createScoredRule('proj4', 0.4),
+      ]
+
+      const result = aggregateByProject(scoredRules)
+
+      expect(result).toHaveLength(3) // proj4 filtered out
+      expect(result[0].projectId).toBe('proj1')
+      expect(result[0].confidence).toBe(0.92)
+      expect(result[1].projectId).toBe('proj3')
+      expect(result[1].confidence).toBeCloseTo(0.657, 3)
+      expect(result[2].projectId).toBe('proj2')
+      expect(result[2].confidence).toBe(0.55)
+    })
   })
 })
 

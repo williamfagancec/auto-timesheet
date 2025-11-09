@@ -1,4 +1,5 @@
 import { prisma } from 'database'
+import createDefaultSuggestionEngine from './suggestion-factory'
 import { getValidAccessToken } from '../auth/token-refresh.js'
 
 /**
@@ -187,9 +188,10 @@ export async function saveEventsToDatabase(
   userId: string,
   calendarId: string,
   events: GoogleCalendarEvent[]
-): Promise<{ created: number; updated: number }> {
+): Promise<{ created: number; updated: number; affectedEventIds: string[] }> {
   let created = 0
   let updated = 0
+  const affectedEventIds: string[] = []
 
   for (const event of events) {
     const startTimeStr = event.start.dateTime || event.start.date
@@ -240,7 +242,7 @@ export async function saveEventsToDatabase(
               title: event.summary || 'Untitled',
               startTime: segment.startTime,
               endTime: segment.endTime,
-              attendees: event.attendees ? JSON.parse(JSON.stringify(event.attendees)) : null,
+              attendees: event.attendees ? (structuredClone(event.attendees) as any) : undefined,
               location: event.location || null,
               status,
               isAllDay: false, // Multi-day splits are not all-day events
@@ -248,6 +250,8 @@ export async function saveEventsToDatabase(
             },
           })
           created++
+          // created record has googleEventId + splitIndex — we don't have id here; record the googleEventId
+          affectedEventIds.push(event.id)
         }
       } else {
         // Single-day event - normal upsert
@@ -267,13 +271,14 @@ export async function saveEventsToDatabase(
               title: event.summary || 'Untitled',
               startTime,
               endTime,
-              attendees: event.attendees ? JSON.parse(JSON.stringify(event.attendees)) : null,
+              attendees: event.attendees ? (structuredClone(event.attendees) as any) : undefined,
               location: event.location || null,
               status,
               isAllDay,
             },
           })
           updated++
+          affectedEventIds.push(existing.id)
         } else {
           await prisma.calendarEvent.create({
             data: {
@@ -283,7 +288,7 @@ export async function saveEventsToDatabase(
               title: event.summary || 'Untitled',
               startTime,
               endTime,
-              attendees: event.attendees ? JSON.parse(JSON.stringify(event.attendees)) : null,
+              attendees: event.attendees ? (structuredClone(event.attendees) as any) : undefined,
               location: event.location || null,
               status,
               isAllDay,
@@ -291,6 +296,7 @@ export async function saveEventsToDatabase(
             },
           })
           created++
+          affectedEventIds.push(event.id)
         }
       }
     } catch (error) {
@@ -298,7 +304,7 @@ export async function saveEventsToDatabase(
     }
   }
 
-  return { created, updated }
+  return { created, updated, affectedEventIds }
 }
 
 /**
@@ -377,7 +383,7 @@ export async function syncUserEvents(userId: string): Promise<{
     },
   })
 
-  if (!connection || !connection.selectedCalendarIds) {
+  if (!connection?.selectedCalendarIds) {
     throw new Error('No calendar connection found or no calendars selected')
   }
 
@@ -404,13 +410,46 @@ export async function syncUserEvents(userId: string): Promise<{
 
       console.log(`Fetched ${events.length} events, ${filteredEvents.length} after filtering (timeMax: ${timeMax.toISOString()})`)
 
-      const { created, updated } = await saveEventsToDatabase(userId, calendarId, filteredEvents)
+  const { created, updated, affectedEventIds } = await saveEventsToDatabase(userId, calendarId, filteredEvents)
 
-      totalCreated += created
-      totalUpdated += updated
+  totalCreated += created
+  totalUpdated += updated
       calendarsProcessed++
 
       console.log(`Calendar ${calendarId}: ${created} created, ${updated} updated`)
+
+      // Generate suggestions for affected events (non-blocking but awaited here)
+      try {
+        if (affectedEventIds && affectedEventIds.length > 0) {
+          const engine = createDefaultSuggestionEngine()
+          const suggestionsMap = await engine.generateBatchSuggestions(affectedEventIds, userId)
+
+          // Persist suggestion logs for non-null suggestions
+          const logsToCreate = [] as { userId: string; eventId: string; suggestedProjectId: string; confidence: number; outcome: string }[]
+          for (const [eventId, suggestion] of suggestionsMap.entries()) {
+            if (suggestion) {
+              logsToCreate.push({
+                userId,
+                eventId,
+                suggestedProjectId: suggestion.projectId,
+                confidence: suggestion.confidence,
+                outcome: 'IGNORED',
+              })
+            }
+          }
+
+          if (logsToCreate.length > 0) {
+            // Use createMany for bulk insert
+            await prisma.suggestionLog.createMany({
+              data: logsToCreate,
+              skipDuplicates: true,
+            })
+          }
+        }
+      } catch (error) {
+        console.error('[Calendar Sync] Suggestion generation failed:', error)
+        // Do not fail sync on suggestion errors
+      }
     } catch (error) {
       console.error(`Failed to sync calendar ${calendarId}:`, error)
       // Continue with other calendars even if one fails
