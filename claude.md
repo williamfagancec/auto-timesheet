@@ -682,6 +682,121 @@ Backend:
 = total hours per project/day
 ```
 
+### 📋 AI Suggestion Engine - Phase 0: Documentation & Structure Setup (2025-01-09)
+
+**Status:** Phase 0 Complete - Infrastructure and documentation ready for incremental implementation
+
+**Goal:** Prepare project structure and comprehensive documentation for 10-phase AI engine implementation.
+
+**What Was Completed:**
+
+1. **Documentation Structure** (`docs/` subdirectory)
+   - ✅ Created `docs/AI_ENGINE.md` - Complete 10-phase implementation roadmap
+     - Phase 1: Data Model & Schema (already complete)
+     - Phase 2: Pattern Extraction
+     - Phase 3: Confidence Calculation
+     - Phase 4: Suggestion Generation
+     - Phase 5: Learning & Feedback
+     - Phase 6: API Endpoints
+     - Phase 7: Analytics & Monitoring
+     - Phase 8: Performance Optimization
+     - Phase 9: Edge Cases & Error Handling
+     - Phase 10: Integration & Testing
+   - ✅ Created `docs/API.md` - tRPC endpoint documentation
+   - ✅ Created `docs/TESTING.md` - Testing strategy and test case templates
+
+2. **Database Schema Enhancements** (`packages/database/prisma/schema.prisma`)
+   - ✅ Enhanced `CategoryRule` model with new fields:
+     - `confidenceScore` (renamed from `confidence`)
+     - `totalSuggestions` - Track suggestion count
+     - `lastMatchedAt` - Timestamp of last match
+     - Additional index on `[userId, condition]`
+     - Additional index on `[userId, projectId]`
+   - ✅ Added `SuggestionLog` model for analytics:
+     - Track suggestion outcomes (ACCEPTED, REJECTED, IGNORED)
+     - Link to user, event, and suggested project
+     - Indexed for performance queries
+   - ✅ Updated relations for User, Project, and CalendarEvent models
+   - ✅ Prisma client generated successfully
+
+3. **Shared Type Definitions** (`packages/shared/index.ts`)
+   - ✅ Updated `CategoryRuleType` enum with new naming:
+     - `TITLE_KEYWORD` - Match based on keywords in event title
+     - `ATTENDEE_EMAIL` - Match based on specific attendee email
+     - `ATTENDEE_DOMAIN` - Match based on email domain (NEW)
+     - `CALENDAR_NAME` - Match based on Google Calendar ID
+     - `RECURRING_EVENT_ID` - Match based on Google recurring event ID
+   - ✅ Added `SuggestionOutcome` enum:
+     - `ACCEPTED` - User accepted AI suggestion
+     - `REJECTED` - User chose different project
+     - `IGNORED` - User skipped/ignored event
+
+4. **AI Service Stub** (`apps/api/src/services/ai-categorization.ts`)
+   - ✅ Created service file with TypeScript interfaces and JSDoc comments
+   - ✅ Defined main public functions:
+     - `getSuggestionsForEvent()` - Main entry point for suggestions
+     - `learnFromCategorization()` - Create/update rules when user categorizes
+     - `updateRuleAccuracy()` - Update accuracy based on feedback
+   - ✅ Outlined internal helper functions:
+     - Pattern extraction (title, attendees, calendar, recurring)
+     - Confidence calculation (base + combined)
+     - Rule matching (for each rule type)
+   - ✅ All functions documented with JSDoc comments and usage examples
+   - ✅ No implementation yet - stubs return empty arrays/void
+
+5. **Test Infrastructure** (`apps/api/src/services/__tests__/ai-categorization.test.ts`)
+   - ✅ Created test file with Vitest setup
+   - ✅ Skeleton test cases for all phases:
+     - Pattern extraction tests (Phase 2)
+     - Confidence calculation tests (Phase 3)
+     - Suggestion generation tests (Phase 4)
+     - Learning & feedback tests (Phase 5)
+     - Integration tests (Phase 6)
+     - Edge case tests (Phase 9)
+   - ✅ One passing test: "should return empty array when no rules exist"
+   - ✅ All other tests marked as `.todo()` for future implementation
+
+**Architecture Decisions:**
+
+- **Rule Types:** 5 types (added ATTENDEE_DOMAIN for domain-level matching)
+- **Confidence Threshold:** 50% (AI_CONFIG.minConfidenceThreshold = 0.5)
+- **Learning Approach:** Incremental, user-driven pattern extraction
+- **No Breaking Changes:** Existing endpoints remain functional during implementation
+
+**10-Phase Roadmap:**
+
+Implementation will proceed incrementally with additional context provided at each phase:
+
+- **Phase 1:** ✅ COMPLETE - Data model and schema already exist
+- **Phase 2:** Pattern Extraction (awaiting context)
+- **Phase 3:** Confidence Calculation (awaiting context)
+- **Phase 4:** Suggestion Generation (awaiting context)
+- **Phase 5:** Learning & Feedback (awaiting context)
+- **Phase 6:** API Endpoints (awaiting context)
+- **Phase 7:** Analytics and Monitoring (optional for MVP)
+- **Phase 8:** Performance Optimization (post-MVP)
+- **Phase 9:** Edge Cases and Error Handling (post-MVP)
+- **Phase 10:** Integration and Testing (final validation)
+
+**Success Criteria (from AI_ENGINE.md):**
+
+- 60%+ suggestion accuracy after 3-4 weeks of usage
+- Confidence-based filtering (only show suggestions with >50% confidence)
+- Multi-factor rule matching (title, attendees, calendar, recurring events)
+- Continuous learning from user feedback (accept/reject suggestions)
+
+**Next Steps:**
+
+- Run database migration to apply schema changes: `pnpm db:migrate`
+- Await context for Phase 2: Pattern Extraction
+- Begin implementing pattern extraction functions incrementally
+
+**Documentation Reference:**
+
+- See `docs/AI_ENGINE.md` for complete architecture and phase details
+- See `docs/API.md` for API endpoint specifications
+- See `docs/TESTING.md` for testing strategy and test cases
+
 ### 🚧 Partially Implemented
 
 - Background jobs - BullMQ configured and jobs created, but Redis needs read-write access
@@ -690,7 +805,6 @@ Backend:
 ### ❌ Not Started
 
 **Backend**
-- AI categorization engine (rule-based)
 - Session cleanup jobs
 - Structured logging (currently console.log)
 - Token refresh with race condition handling

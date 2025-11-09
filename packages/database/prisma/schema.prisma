@@ -17,12 +17,13 @@ model User {
   hashedPassword String?  // Optional: null for OAuth-only users
   createdAt      DateTime @default(now())
 
-  sessions    Session[]
-  projects    Project[]
-  entries     TimesheetEntry[]
-  rules       CategoryRule[]
-  calendars   CalendarConnection[]
-  events      CalendarEvent[]
+  sessions        Session[]
+  projects        Project[]
+  entries         TimesheetEntry[]
+  rules           CategoryRule[]
+  calendars       CalendarConnection[]
+  events          CalendarEvent[]
+  suggestionLogs  SuggestionLog[]
 }
 
 model Session {
@@ -63,9 +64,10 @@ model Project {
   useCount   Int      @default(0)
   createdAt  DateTime @default(now())
 
-  user    User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  entries TimesheetEntry[]
-  rules   CategoryRule[]
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entries         TimesheetEntry[]
+  rules           CategoryRule[]
+  suggestionLogs  SuggestionLog[]
 
   @@index([userId, lastUsedAt])
 }
@@ -87,8 +89,9 @@ model CalendarEvent {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  entry TimesheetEntry?
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entry           TimesheetEntry?
+  suggestionLogs  SuggestionLog[]
 
   @@unique([userId, googleEventId, splitIndex])
   @@index([userId, startTime])
@@ -116,19 +119,41 @@ model TimesheetEntry {
 }
 
 model CategoryRule {
-  id         String   @id @default(cuid())
-  userId     String
-  ruleType   String
-  condition  String
-  projectId  String
-  confidence Float    @default(0.5)
-  matchCount Int      @default(0)
-  accuracy   Float    @default(0)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id               String    @id @default(cuid())
+  userId           String
+  ruleType         String    // TITLE_KEYWORD, ATTENDEE_EMAIL, ATTENDEE_DOMAIN, CALENDAR_NAME, RECURRING_EVENT_ID
+  condition        String    // The pattern to match (e.g., keyword, email, domain, calendar ID, or event ID)
+  projectId        String
+  confidenceScore  Float     @default(0.5) // Base confidence score (0.0-1.0)
+  matchCount       Int       @default(0)   // Number of times this rule has been matched
+  totalSuggestions Int       @default(0)   // Total times this rule was suggested (accepted or rejected)
+  accuracy         Float     @default(0)   // Success rate: acceptedCount / totalSuggestions
+  lastMatchedAt    DateTime? // Last time this rule was matched/suggested
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([userId, ruleType])
+  @@index([userId, condition])
+  @@index([userId, projectId])
+}
+
+model SuggestionLog {
+  id                  String   @id @default(cuid())
+  userId              String
+  eventId             String
+  suggestedProjectId  String
+  confidence          Float    // Confidence score of the suggestion (0.0-1.0)
+  outcome             String   // ACCEPTED, REJECTED, IGNORED
+  createdAt           DateTime @default(now())
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event   CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  project Project       @relation(fields: [suggestedProjectId], references: [id], onDelete: Cascade)
+
+  @@index([userId, outcome])
+  @@index([userId, createdAt])
+  @@index([eventId])
 }

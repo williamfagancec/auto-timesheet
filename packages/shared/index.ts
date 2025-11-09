@@ -18,17 +18,26 @@ export const TimesheetEntrySchema = z.object({
   notes: z.string().optional(),
 })
 
+// AI Categorization Enums
 export const CategoryRuleType = z.enum([
-  'title_keyword',
-  'attendee_email',
-  'calendar_name',
-  'recurring_event',
+  'TITLE_KEYWORD',      // Match based on keywords in event title
+  'ATTENDEE_EMAIL',     // Match based on specific attendee email address
+  'ATTENDEE_DOMAIN',    // Match based on attendee email domain (e.g., @company.com)
+  'CALENDAR_NAME',      // Match based on source Google Calendar ID
+  'RECURRING_EVENT_ID', // Match based on Google recurring event ID
+])
+
+export const SuggestionOutcome = z.enum([
+  'ACCEPTED',  // User accepted the AI suggestion
+  'REJECTED',  // User chose a different project (rejected suggestion)
+  'IGNORED',   // User skipped/ignored the event entirely
 ])
 
 // Type exports
 export type ProjectInput = z.infer<typeof ProjectSchema>
 export type TimesheetEntryInput = z.infer<typeof TimesheetEntrySchema>
 export type CategoryRuleType = z.infer<typeof CategoryRuleType>
+export type SuggestionOutcome = z.infer<typeof SuggestionOutcome>
 
 // Utility functions
 export function formatDuration(minutes: number): string {
