@@ -56,7 +56,7 @@ async function main() {
   const offsetHours = Number(offsetMatch?.[1]?.slice(1) ?? '0') 
   const offsetMinutes = Number(offsetMatch?.[2] ?? '0')
   const totalOffsetMinutes = offsetSign * (offsetHours * 60 + offsetMinutes)
-  const userLocalNow = newDate(utcNow.getTime() + totalOffsetMinutes * 60_000) 
+  const userLocalNow = newDate(utcNow.getTime() + totalOffsetMinutes * 60 * 1000)
   const weekStart = getStartOfCurrentWeek()
 
   console.log('⏰ Time Calculations:')

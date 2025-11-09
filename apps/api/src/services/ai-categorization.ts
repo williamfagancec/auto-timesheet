@@ -7,9 +7,10 @@
  * @see docs/AI_ENGINE.md for complete architecture documentation
  */
 
-import { PrismaClient, CategoryRule } from '@prisma/client'
-import { AI_CONFIG } from '@repo/config'
-import { CategoryRuleType } from '@repo/shared'
+import { PrismaClient } from '@prisma/client'
+// import { CategoryRule } from '@prisma/client' // TODO: Will be used in Phase 3+
+// import { AI_CONFIG } from 'config' // TODO: Will be used in Phase 3
+import { CategoryRuleType } from 'shared'
 
 /**
  * Calendar event data structure for AI processing
@@ -87,9 +88,9 @@ interface ExtractedPattern {
  * @see docs/AI_ENGINE.md Phase 4: Suggestion Generation
  */
 export async function getSuggestionsForEvent(
-  prisma: PrismaClient,
-  userId: string,
-  event: CalendarEventInput
+  _prisma: PrismaClient,
+  _userId: string,
+  _event: CalendarEventInput
 ): Promise<ProjectSuggestion[]> {
   // TODO: Implement in Phase 4
   // 1. Fetch all active rules for user
@@ -129,11 +130,11 @@ export async function getSuggestionsForEvent(
  * @see docs/AI_ENGINE.md Phase 5: Learning & Feedback
  */
 export async function learnFromCategorization(
-  prisma: PrismaClient,
-  userId: string,
-  event: CalendarEventInput,
-  projectId: string,
-  wasAutoSuggestion: boolean
+  _prisma: PrismaClient,
+  _userId: string,
+  _event: CalendarEventInput,
+  _projectId: string,
+  _wasAutoSuggestion: boolean
 ): Promise<void> {
   // TODO: Implement in Phase 5
   // 1. Extract patterns from event (title, attendees, calendar, recurring)
@@ -166,9 +167,9 @@ export async function learnFromCategorization(
  * @see docs/AI_ENGINE.md Phase 5: Learning & Feedback
  */
 export async function updateRuleAccuracy(
-  prisma: PrismaClient,
-  ruleId: string,
-  wasAccepted: boolean
+  _prisma: PrismaClient,
+  _ruleId: string,
+  _wasAccepted: boolean
 ): Promise<void> {
   // TODO: Implement in Phase 5
   // Formula: newAccuracy = (accuracy * matchCount + (wasAccepted ? 1 : 0)) / (matchCount + 1)
@@ -186,37 +187,140 @@ export async function updateRuleAccuracy(
  * skipping common stop words like "meeting", "call", "sync".
  *
  * @param title - Event title
- * @returns Array of extracted keywords
+ * @returns Array of extracted keywords (max 3)
+ *
+ * @example
+ * ```typescript
+ * extractTitleKeywords("Engineering Standup Meeting")
+ * // Returns: ["engineering", "standup"]
+ *
+ * extractTitleKeywords("Weekly Review: Q4 Planning")
+ * // Returns: ["q4", "planning"]
+ * ```
  *
  * @internal
  */
 function extractTitleKeywords(title: string): string[] {
-  // TODO: Implement in Phase 2
-  // 1. Normalize: lowercase, trim, remove punctuation
-  // 2. Split into words
-  // 3. Filter out stop words
-  // 4. Return 1-3 most significant words
+  try {
+    if (!title || typeof title !== 'string') {
+      console.warn('[AI] Invalid title for keyword extraction:', title)
+      return []
+    }
 
-  return []
+    // Combined stop words (user-provided + architect-suggested)
+    const STOP_WORDS = new Set([
+      // Common words
+      'a', 'an', 'the', 'and', 'or', 'but', 'in', 'at', 'to', 'for', 'of',
+      'with', 'by', 'from', 'as', 'is', 'was', 'are', 'been', 'be',
+      // Meeting-specific words
+      'meeting', 'call', 'sync', 'chat', 'discussion', 'review', 'session',
+      'weekly', 'daily', 'monthly', 'recurring',
+      // Other
+      'cec',
+    ])
+
+    // 1. Normalize: lowercase, trim
+    const normalized = title.toLowerCase().trim()
+
+    // 2. Remove punctuation (keep letters, numbers, spaces, and Unicode word characters)
+    // Use Unicode-aware regex to preserve accented characters (é, ü, etc.)
+    const cleaned = normalized.replace(/[^\p{L}\p{N}\s]/gu, ' ')
+
+    // 3. Split into words
+    const words = cleaned.split(/\s+/).filter(word => word.length > 0)
+
+    // 4. Filter: remove stop words, keep words >= 3 chars
+    const keywords = words.filter(
+      word => !STOP_WORDS.has(word) && word.length >= 3
+    )
+
+    // 5. Deduplicate and return max 3 keywords
+    return [...new Set(keywords)].slice(0, 3)
+  } catch (error) {
+    console.error('[AI] Keyword extraction error:', error)
+    return []
+  }
 }
 
 /**
  * Extract attendee patterns (emails and domains) from attendee list.
  *
- * @param attendees - Array of attendee email addresses
- * @returns Array of patterns (full emails + domains)
+ * Creates both ATTENDEE_EMAIL and ATTENDEE_DOMAIN patterns for each unique
+ * attendee. Email patterns are specific, domain patterns are broader.
+ *
+ * @param attendees - Array of attendee objects with email addresses
+ * @returns Array of ExtractedPattern objects (emails + domains)
+ *
+ * @example
+ * ```typescript
+ * extractAttendeePatterns([
+ *   { email: "john@acme.com" },
+ *   { email: "jane@acme.com" }
+ * ])
+ * // Returns:
+ * // [
+ * //   { ruleType: 'ATTENDEE_EMAIL', condition: 'john@acme.com' },
+ * //   { ruleType: 'ATTENDEE_DOMAIN', condition: 'acme.com' },
+ * //   { ruleType: 'ATTENDEE_EMAIL', condition: 'jane@acme.com' },
+ * // ]
+ * // Note: domain 'acme.com' appears only once (deduplicated)
+ * ```
  *
  * @internal
  */
 function extractAttendeePatterns(
   attendees: Array<{ email: string }> | undefined
-): string[] {
-  // TODO: Implement in Phase 2
-  // 1. Extract all email addresses
-  // 2. Extract unique domains from emails
-  // 3. Return both (prioritize external domains)
+): ExtractedPattern[] {
+  try {
+    if (!attendees || !Array.isArray(attendees) || attendees.length === 0) {
+      return []
+    }
 
-  return []
+    const patterns: ExtractedPattern[] = []
+    const seenEmails = new Set<string>()
+    const seenDomains = new Set<string>()
+
+    for (const attendee of attendees) {
+      if (!attendee.email || typeof attendee.email !== 'string') {
+        continue
+      }
+
+      // Normalize email to lowercase
+      const email = attendee.email.toLowerCase().trim()
+
+      // Skip invalid emails (check for @ symbol and text before/after)
+      const emailParts = email.split('@')
+      if (emailParts.length !== 2 || !emailParts[0] || !emailParts[1]) {
+        console.warn('[AI] Invalid email format, skipping:', attendee.email)
+        continue
+      }
+
+      const domain = emailParts[1]
+
+      // Add ATTENDEE_EMAIL pattern (if not already seen)
+      if (!seenEmails.has(email)) {
+        patterns.push({
+          ruleType: 'ATTENDEE_EMAIL',
+          condition: email,
+        })
+        seenEmails.add(email)
+      }
+
+      // Extract and add ATTENDEE_DOMAIN pattern
+      if (domain && !seenDomains.has(domain)) {
+        patterns.push({
+          ruleType: 'ATTENDEE_DOMAIN',
+          condition: domain,
+        })
+        seenDomains.add(domain)
+      }
+    }
+
+    return patterns
+  } catch (error) {
+    console.error('[AI] Attendee pattern extraction error:', error)
+    return []
+  }
 }
 
 /**
@@ -226,20 +330,76 @@ function extractAttendeePatterns(
  * attendee patterns, calendar ID, and recurring event ID.
  *
  * @param event - Calendar event
- * @returns Array of extracted patterns
+ * @returns Array of extracted patterns (all types combined)
+ *
+ * @example
+ * ```typescript
+ * extractPatternsFromEvent({
+ *   id: 'evt_123',
+ *   title: "Engineering Standup",
+ *   attendees: [{ email: "team@acme.com" }],
+ *   calendarId: "primary",
+ *   googleEventId: "recurring_abc123"
+ * })
+ * // Returns:
+ * // [
+ * //   { ruleType: 'TITLE_KEYWORD', condition: 'engineering' },
+ * //   { ruleType: 'TITLE_KEYWORD', condition: 'standup' },
+ * //   { ruleType: 'ATTENDEE_EMAIL', condition: 'team@acme.com' },
+ * //   { ruleType: 'ATTENDEE_DOMAIN', condition: 'acme.com' },
+ * //   { ruleType: 'CALENDAR_NAME', condition: 'primary' },
+ * //   { ruleType: 'RECURRING_EVENT_ID', condition: 'recurring_abc123' }
+ * // ]
+ * ```
  *
  * @internal
  */
 function extractPatternsFromEvent(event: CalendarEventInput): ExtractedPattern[] {
-  // TODO: Implement in Phase 2
-  // Call all extraction functions and combine results
+  try {
+    const patterns: ExtractedPattern[] = []
 
-  return []
+    // 1. Extract title keyword patterns
+    const keywords = extractTitleKeywords(event.title)
+    for (const keyword of keywords) {
+      patterns.push({
+        ruleType: 'TITLE_KEYWORD',
+        condition: keyword,
+      })
+    }
+
+    // 2. Extract attendee patterns (emails + domains)
+    const attendeePatterns = extractAttendeePatterns(event.attendees)
+    patterns.push(...attendeePatterns)
+
+    // 3. Add calendar pattern if calendarId exists
+    if (event.calendarId) {
+      patterns.push({
+        ruleType: 'CALENDAR_NAME',
+        condition: event.calendarId,
+      })
+    }
+
+    // 4. Add recurring event pattern if googleEventId exists
+    // Note: For recurring events, googleEventId is the recurring event ID
+    if (event.googleEventId) {
+      patterns.push({
+        ruleType: 'RECURRING_EVENT_ID',
+        condition: event.googleEventId,
+      })
+    }
+
+    return patterns
+  } catch (error) {
+    console.error('[AI] Pattern extraction failed:', error, { eventId: event.id })
+    return []
+  }
 }
 
 // =============================================================================
 // PHASE 3: CONFIDENCE CALCULATION (Internal Helper Functions)
 // =============================================================================
+
+// TODO: Uncomment and implement in Phase 3
 
 /**
  * Calculate confidence score for a single rule.
@@ -253,12 +413,12 @@ function extractPatternsFromEvent(event: CalendarEventInput): ExtractedPattern[]
  *
  * @internal
  */
-function calculateRuleConfidence(rule: CategoryRule): number {
-  // TODO: Implement in Phase 3
-  // Formula: rule.confidenceScore * (1 + AI_CONFIG.learningAccuracyWeight * rule.accuracy)
-
-  return 0
-}
+// function calculateRuleConfidence(_rule: CategoryRule): number {
+//   // TODO: Implement in Phase 3
+//   // Formula: rule.confidenceScore * (1 + AI_CONFIG.learningAccuracyWeight * rule.accuracy)
+//
+//   return 0
+// }
 
 /**
  * Calculate combined confidence when multiple rules match the same project.
@@ -270,16 +430,18 @@ function calculateRuleConfidence(rule: CategoryRule): number {
  *
  * @internal
  */
-function calculateCombinedConfidence(confidences: number[]): number {
-  // TODO: Implement in Phase 3
-  // Formula: 1 - product((1 - confidence) for each confidence)
-
-  return 0
-}
+// function calculateCombinedConfidence(_confidences: number[]): number {
+//   // TODO: Implement in Phase 3
+//   // Formula: 1 - product((1 - confidence) for each confidence)
+//
+//   return 0
+// }
 
 // =============================================================================
 // PHASE 4: RULE MATCHING (Internal Helper Functions)
 // =============================================================================
+
+// TODO: Uncomment and implement in Phase 4
 
 /**
  * Check if event title matches a TITLE_KEYWORD rule.
@@ -292,12 +454,12 @@ function calculateCombinedConfidence(confidences: number[]): number {
  *
  * @internal
  */
-function matchTitleKeyword(rule: CategoryRule, event: CalendarEventInput): boolean {
-  // TODO: Implement in Phase 4
-  // Normalize both and check if title contains keyword
-
-  return false
-}
+// function matchTitleKeyword(_rule: CategoryRule, _event: CalendarEventInput): boolean {
+//   // TODO: Implement in Phase 4
+//   // Normalize both and check if title contains keyword
+//
+//   return false
+// }
 
 /**
  * Check if event attendees match an ATTENDEE_EMAIL or ATTENDEE_DOMAIN rule.
@@ -310,12 +472,12 @@ function matchTitleKeyword(rule: CategoryRule, event: CalendarEventInput): boole
  *
  * @internal
  */
-function matchAttendeeEmail(rule: CategoryRule, event: CalendarEventInput): boolean {
-  // TODO: Implement in Phase 4
-  // Check for exact match or domain match
-
-  return false
-}
+// function matchAttendeeEmail(_rule: CategoryRule, _event: CalendarEventInput): boolean {
+//   // TODO: Implement in Phase 4
+//   // Check for exact match or domain match
+//
+//   return false
+// }
 
 /**
  * Check if event calendar matches a CALENDAR_NAME rule.
@@ -326,12 +488,12 @@ function matchAttendeeEmail(rule: CategoryRule, event: CalendarEventInput): bool
  *
  * @internal
  */
-function matchCalendarName(rule: CategoryRule, event: CalendarEventInput): boolean {
-  // TODO: Implement in Phase 4
-  // Exact match on calendarId
-
-  return false
-}
+// function matchCalendarName(_rule: CategoryRule, _event: CalendarEventInput): boolean {
+//   // TODO: Implement in Phase 4
+//   // Exact match on calendarId
+//
+//   return false
+// }
 
 /**
  * Check if event is a recurring event that matches a RECURRING_EVENT_ID rule.
@@ -342,12 +504,12 @@ function matchCalendarName(rule: CategoryRule, event: CalendarEventInput): boole
  *
  * @internal
  */
-function matchRecurringEvent(rule: CategoryRule, event: CalendarEventInput): boolean {
-  // TODO: Implement in Phase 4
-  // Exact match on googleEventId
-
-  return false
-}
+// function matchRecurringEvent(_rule: CategoryRule, _event: CalendarEventInput): boolean {
+//   // TODO: Implement in Phase 4
+//   // Exact match on googleEventId
+//
+//   return false
+// }
 
 /**
  * Check if a rule matches an event based on rule type.
@@ -360,21 +522,28 @@ function matchRecurringEvent(rule: CategoryRule, event: CalendarEventInput): boo
  *
  * @internal
  */
-function doesRuleMatch(rule: CategoryRule, event: CalendarEventInput): boolean {
-  // TODO: Implement in Phase 4
-  // Switch on rule.ruleType and call appropriate matcher
-
-  return false
-}
+// function doesRuleMatch(_rule: CategoryRule, _event: CalendarEventInput): boolean {
+//   // TODO: Implement in Phase 4
+//   // Switch on rule.ruleType and call appropriate matcher
+//
+//   return false
+// }
 
 // =============================================================================
 // EXPORTS
 // =============================================================================
 
-// Only export the main public functions
-// Internal helper functions remain private to this module
+// Main public API (default export)
 export default {
   getSuggestionsForEvent,
   learnFromCategorization,
   updateRuleAccuracy,
+}
+
+// Named exports for testing internal Phase 2 functions
+// These are exported for testing purposes only (@internal)
+export {
+  extractTitleKeywords,
+  extractAttendeePatterns,
+  extractPatternsFromEvent,
 }

@@ -98,7 +98,8 @@ See `packages/database/prisma/schema.prisma` for the complete schema.
 - `CalendarEvent` - Synced calendar events
 - `Project` - User-defined project categories
 - `TimesheetEntry` - Time entries (manual or from events)
-- `CategoryRule` - AI learning rules for auto-categorization
+- `CategoryRule` - AI learning rules for auto-categorization (enhanced with totalSuggestions, lastMatchedAt)
+- `SuggestionLog` - Track AI suggestion outcomes for analytics (NEW)
 
 ## Security Implementation
 
@@ -797,6 +798,143 @@ Implementation will proceed incrementally with additional context provided at ea
 - See `docs/API.md` for API endpoint specifications
 - See `docs/TESTING.md` for testing strategy and test cases
 
+---
+
+### 📋 AI Suggestion Engine - Phase 0 Continued: Migration & Seed Data (2025-01-09)
+
+**Status:** Migration and seed scripts created, ready to apply
+
+**Goal:** Create database migration and sample test data for AI engine development and testing.
+
+**What Was Completed:**
+
+1. **Prisma Migration** (`packages/database/prisma/migrations/20250109_ai_suggestion_engine/`)
+   - ✅ Created `migration.sql` with SQL statements for schema changes:
+     - Renamed `CategoryRule.confidence` → `confidenceScore`
+     - Added `CategoryRule.totalSuggestions` (INT, default 0)
+     - Added `CategoryRule.lastMatchedAt` (TIMESTAMP, nullable)
+     - Added 2 new indexes: `[userId, condition]` and `[userId, projectId]`
+     - Created `SuggestionLog` table with 3 indexes for analytics
+     - Added foreign keys with CASCADE delete
+   - ✅ Created `README.md` with migration documentation and rollback instructions
+   - ✅ Migration ready to apply with `npx prisma migrate deploy`
+
+2. **Database Seed Script** (`packages/database/prisma/seed.ts`)
+   - ✅ Created comprehensive seed script with realistic test data:
+     - **1 test user:** `test@example.com`
+     - **4 sample projects:** Internal, Acme Corp Client, Globex Industries, Engineering
+     - **9 CategoryRule records** with varying confidence and accuracy:
+       - 1 recurring event rule (0.9 confidence, 100% accuracy) - Weekly standup
+       - 2 email domain rules (@acme.com, @globexindustries.com)
+       - 1 specific attendee email rule (john.smith@acme.com)
+       - 4 keyword rules (standup, review, planning, demo)
+       - 1 calendar rule (primary calendar)
+     - **2 sample calendar events** for testing suggestions
+     - **2 suggestion logs** with ACCEPTED outcomes
+   - ✅ All rules include realistic `matchCount`, `totalSuggestions`, `accuracy`, and `lastMatchedAt` timestamps
+   - ✅ Seed script uses `upsert` for idempotency (safe to run multiple times)
+   - ✅ Added seed command to `package.json`: `pnpm db:seed`
+   - ✅ Installed `tsx` dependency for running TypeScript seed script
+
+3. **Documentation Updates** (`docs/AI_ENGINE.md`)
+   - ✅ Updated all field references from `confidence` → `confidenceScore`
+   - ✅ Added `totalSuggestions` and `lastMatchedAt` to field documentation
+   - ✅ Updated all code examples to use correct field names
+   - ✅ Updated formulas to reference `rule.confidenceScore`
+   - ✅ Updated validation section with new field constraints
+   - ✅ Updated database indexes documentation
+   - ✅ Updated analytics queries to use `confidenceScore`
+   - ✅ All documentation now matches Prisma schema exactly (lines 121-141)
+
+**Sample Rule Data Created:**
+
+High Confidence Rules (>0.8):
+- Recurring standup → Engineering (0.9, 100% accuracy, 25 matches)
+- john.smith@acme.com → Acme Client (0.85, 100% accuracy, 6 matches)
+- @acme.com domain → Acme Client (0.8, 80% accuracy, 12/15 suggestions)
+
+Medium Confidence Rules (0.6-0.8):
+- "standup" keyword → Engineering (0.7, 85.7% accuracy, 30/35 suggestions)
+- "demo" keyword → Acme Client (0.7, 71.4% accuracy, 5/7 suggestions)
+- @globexindustries.com → Globex (0.75, 80% accuracy, 8/10 suggestions)
+
+Lower Confidence Rules (0.5-0.6):
+- "review" keyword → Internal (0.6, 66.7% accuracy, 10/15 suggestions)
+- "planning" keyword → Internal (0.65, 80% accuracy, 8/10 suggestions)
+- Primary calendar → Internal (0.5, 50% accuracy, 50/100 suggestions)
+
+**File Structure:**
+
+```
+packages/database/
+├── prisma/
+│   ├── migrations/
+│   │   └── 20250109_ai_suggestion_engine/
+│   │       ├── migration.sql          # SQL migration statements
+│   │       └── README.md              # Migration documentation
+│   ├── schema.prisma                  # Enhanced schema with new fields
+│   └── seed.ts                        # Seed script with test data
+└── package.json                       # Added db:seed script
+```
+
+**How to Apply:**
+
+1. **Apply Migration:**
+   ```bash
+   cd packages/database
+   npx prisma migrate deploy
+   ```
+
+2. **Run Seed Script:**
+   ```bash
+   cd packages/database
+   npx prisma db seed
+   ```
+   Or from project root:
+   ```bash
+   pnpm --filter database db:seed
+   ```
+
+3. **Verify in Prisma Studio:**
+   ```bash
+   cd packages/database
+   npx prisma studio
+   ```
+
+**Next Steps:**
+
+- Apply migration to database
+- Run seed script to populate test data
+- Begin Phase 2 implementation: Pattern Extraction
+- Test AI engine with realistic sample rules
+
+**Session Summary:**
+
+This session completed Phase 0 of the AI Suggestion Engine implementation:
+- ✅ 3 comprehensive documentation files (AI_ENGINE.md, API.md, TESTING.md)
+- ✅ Database schema enhanced with 2 new fields and 2 new indexes
+- ✅ New SuggestionLog table for analytics
+- ✅ Prisma migration ready to deploy
+- ✅ Seed script with 9 realistic test rules across all 5 rule types
+- ✅ AI service stub file with complete JSDoc documentation
+- ✅ Test infrastructure with skeleton test cases for all 10 phases
+- ✅ All documentation updated to match Prisma schema exactly
+
+**Total Files Created/Modified:** 13 files
+- 3 documentation files
+- 1 migration (2 files: SQL + README)
+- 1 seed script
+- 1 AI service stub
+- 1 test file
+- 1 Prisma schema update
+- 1 shared types update
+- 1 package.json update
+- 1 CLAUDE.md update
+
+The AI Suggestion Engine infrastructure is now complete and ready for Phase 2 implementation!
+
+---
+
 ### 🚧 Partially Implemented
 
 - Background jobs - BullMQ configured and jobs created, but Redis needs read-write access
@@ -886,8 +1024,8 @@ Implementation will proceed incrementally with additional context provided at ea
 
 - `apps/api/src/routers/auth.ts` - Authentication endpoints (login, signup, OAuth callback)
 - `apps/api/src/routers/calendar.ts` - Calendar API (list, select, sync)
-- `apps/api/src/routers/project.ts` - Project endpoints (stub)
-- `apps/api/src/routers/timesheet.ts` - Timesheet endpoints (stub)
+- `apps/api/src/routers/project.ts` - Project endpoints and AI suggestions
+- `apps/api/src/routers/timesheet.ts` - Timesheet endpoints with categorization
 - `apps/api/src/auth/lucia.ts` - Lucia Auth configuration
 - `apps/api/src/auth/google.ts` - Google OAuth setup (Arctic)
 - `apps/api/src/auth/encryption.ts` - AES-256-GCM token encryption utilities
@@ -896,10 +1034,14 @@ Implementation will proceed incrementally with additional context provided at ea
 - `apps/api/src/auth/oauth-state-store.ts` - In-memory OAuth state storage
 - `apps/api/src/services/google-calendar.ts` - Google Calendar API integration
 - `apps/api/src/services/calendar-sync.ts` - Event fetching, filtering, and multi-day splitting
+- `apps/api/src/services/ai-categorization.ts` - AI suggestion engine (stub, Phase 0 complete)
+- `apps/api/src/services/__tests__/ai-categorization.test.ts` - AI engine test suite
 - `apps/api/src/jobs/calendar-sync-job.ts` - BullMQ background sync jobs
 - `apps/api/src/index.ts` - Fastify server setup with CORS and rate limiting
 - `apps/api/oauth-diagnostic-tool.ts` - OAuth debugging CLI tool
-- `packages/database/prisma/schema.prisma` - Database schema
+- `packages/database/prisma/schema.prisma` - Database schema (CategoryRule, SuggestionLog)
+- `packages/database/prisma/seed.ts` - Database seed script with sample AI rules
+- `packages/database/prisma/migrations/20250109_ai_suggestion_engine/` - AI engine schema migration
 
 **Frontend**
 
@@ -914,5 +1056,12 @@ Implementation will proceed incrementally with additional context provided at ea
 **Configuration**
 
 - `.env` - All environment variables
-- `packages/config/index.ts` - App constants
+- `packages/config/index.ts` - App constants (including AI_CONFIG)
 - `apps/web/vite.config.ts` - Development proxy settings
+
+**Documentation**
+
+- `CLAUDE.md` - Project documentation and status (this file)
+- `docs/AI_ENGINE.md` - AI Suggestion Engine architecture and 10-phase implementation plan
+- `docs/API.md` - tRPC API endpoint documentation
+- `docs/TESTING.md` - Testing strategy and test case templates

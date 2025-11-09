@@ -26,31 +26,36 @@ This document outlines the complete implementation roadmap. Each phase will be i
 
 **Status:** COMPLETE - Schema already exists in production
 
-**Database Model:** `CategoryRule` (see `packages/database/prisma/schema.prisma` lines 118-134)
+**Database Model:** `CategoryRule` (see `packages/database/prisma/schema.prisma` lines 121-141)
 
 **Fields:**
 - `id` - String (CUID) - Primary key
 - `userId` - String - Foreign key to User
-- `ruleType` - String - Type of matching rule (enum: title_keyword, attendee_email, calendar_name, recurring_event)
+- `ruleType` - String - Type of matching rule (enum: TITLE_KEYWORD, ATTENDEE_EMAIL, ATTENDEE_DOMAIN, CALENDAR_NAME, RECURRING_EVENT_ID)
 - `condition` - String - The pattern/value to match against
 - `projectId` - String - Foreign key to Project (what to suggest)
-- `confidence` - Float (default 0.5) - Base confidence score for this rule
-- `matchCount` - Int (default 0) - Number of times rule has been applied
+- `confidenceScore` - Float (default 0.5) - Base confidence score for this rule (0.0-1.0)
+- `matchCount` - Int (default 0) - Number of times rule has been matched
+- `totalSuggestions` - Int (default 0) - Total times this rule was suggested (accepted or rejected)
 - `accuracy` - Float (default 0.0) - Success rate (0.0-1.0) when suggestion was accepted
+- `lastMatchedAt` - DateTime (nullable) - Last time this rule was matched/suggested
 - `createdAt` - DateTime - When rule was created
 - `updatedAt` - DateTime - Last modified timestamp
 
 **Indexes:**
 - `@@index([userId, ruleType])` - Efficient querying of user-specific rules by type
+- `@@index([userId, condition])` - Optimize lookups by condition
+- `@@index([userId, projectId])` - Optimize project-specific queries
 
 **Relationships:**
 - User (one-to-many) - Rules belong to a specific user
 - Project (one-to-many) - Rules suggest a specific project
 
 **Validation:**
-- `confidence` range: 0.0-1.0
+- `confidenceScore` range: 0.0-1.0
 - `accuracy` range: 0.0-1.0
 - `matchCount` >= 0
+- `totalSuggestions` >= 0
 
 ---
 
@@ -101,7 +106,7 @@ This document outlines the complete implementation roadmap. Each phase will be i
 
 **Base Confidence Formula:**
 ```typescript
-baseConfidence = rule.confidence * (1 + AI_CONFIG.learningAccuracyWeight * rule.accuracy)
+baseConfidence = rule.confidenceScore * (1 + AI_CONFIG.learningAccuracyWeight * rule.accuracy)
 ```
 
 **Multi-Rule Confidence Boosting:**
@@ -115,7 +120,7 @@ finalConfidence = 1 - (1 - conf1) * (1 - conf2) * (1 - conf3) * ...
 - Minimum matches for reliable rule: `AI_CONFIG.minMatchesForRule` (3)
 
 **Factors Affecting Confidence:**
-1. **Base rule confidence** - Set when rule is created (default 0.5)
+1. **Base rule confidence** - Set when rule is created (default 0.5, stored in `confidenceScore`)
 2. **Accuracy score** - Historical success rate of the rule (updated on feedback)
 3. **Match count** - Number of times rule has been applied (higher = more reliable)
 4. **Multiple rule matches** - Confidence boosted when multiple rules agree on same project
@@ -123,18 +128,18 @@ finalConfidence = 1 - (1 - conf1) * (1 - conf2) * (1 - conf3) * ...
 **Example Scenarios:**
 
 **Scenario 1: New Rule**
-- `confidence = 0.5`, `accuracy = 0.0`, `matchCount = 0`
+- `confidenceScore = 0.5`, `accuracy = 0.0`, `matchCount = 0`, `totalSuggestions = 0`
 - `baseConfidence = 0.5 * (1 + 0.3 * 0.0) = 0.5` (50%)
 - Result: Suggestion shown (meets 50% threshold)
 
 **Scenario 2: Mature, Accurate Rule**
-- `confidence = 0.5`, `accuracy = 0.9`, `matchCount = 20`
+- `confidenceScore = 0.5`, `accuracy = 0.9`, `matchCount = 20`, `totalSuggestions = 20`
 - `baseConfidence = 0.5 * (1 + 0.3 * 0.9) = 0.635` (63.5%)
 - Result: High-confidence suggestion
 
 **Scenario 3: Multiple Rules Match**
-- Rule 1: Title keyword "standup" → confidence 0.6
-- Rule 2: Attendee "team@company.com" → confidence 0.5
+- Rule 1: Title keyword "standup" → `confidenceScore = 0.6`
+- Rule 2: Attendee "team@company.com" → `confidenceScore = 0.5`
 - `finalConfidence = 1 - (1 - 0.6) * (1 - 0.5) = 0.8` (80%)
 - Result: Very high confidence (multiple signals agree)
 
@@ -271,9 +276,11 @@ async function learnFromCategorization(
           ruleType: pattern.ruleType,
           condition: pattern.condition,
           projectId,
-          confidence: 0.5, // Start with neutral confidence
+          confidenceScore: 0.5, // Start with neutral confidence
           matchCount: 1,
+          totalSuggestions: wasAutoSuggestion ? 1 : 0,
           accuracy: wasAutoSuggestion ? 1.0 : 0.5, // If suggestion was used, start high
+          lastMatchedAt: new Date(),
         },
       })
     }
@@ -291,13 +298,15 @@ async function updateRuleAccuracy(
   const rule = await prisma.categoryRule.findUnique({ where: { id: ruleId } })
 
   // Calculate new accuracy using weighted average
-  const newAccuracy = (rule.accuracy * rule.matchCount + (wasAccepted ? 1 : 0)) / (rule.matchCount + 1)
+  const newAccuracy = (rule.accuracy * rule.totalSuggestions + (wasAccepted ? 1 : 0)) / (rule.totalSuggestions + 1)
 
   await prisma.categoryRule.update({
     where: { id: ruleId },
     data: {
       matchCount: rule.matchCount + 1,
+      totalSuggestions: rule.totalSuggestions + 1,
       accuracy: newAccuracy,
+      lastMatchedAt: new Date(),
     },
   })
 }
@@ -377,9 +386,11 @@ Array<{
   ruleType: CategoryRuleType
   condition: string
   projectName: string
-  confidence: number
+  confidenceScore: number
   matchCount: number
+  totalSuggestions: number
   accuracy: number
+  lastMatchedAt: Date | null
 }>
 
 // Implementation
@@ -389,7 +400,7 @@ async query({ input, ctx }) {
       userId: ctx.user.id,
       projectId: input.projectId,
       ruleType: input.ruleType,
-      confidence: { gte: input.minConfidence || 0 },
+      confidenceScore: { gte: input.minConfidence || 0 },
     },
     include: { project: true },
   })
@@ -440,7 +451,7 @@ const avgAccuracy = await prisma.categoryRule.aggregate({
 const ruleTypeStats = await prisma.categoryRule.groupBy({
   by: ['ruleType'],
   where: { userId },
-  _avg: { accuracy: true, confidence: true },
+  _avg: { accuracy: true, confidenceScore: true },
   _count: true
 })
 ```
@@ -476,8 +487,8 @@ model SuggestionLog {
 **Optimization Strategies:**
 
 1. **Database Indexing**
-   - Already indexed: `[userId, ruleType]`
-   - Consider: `[userId, confidence]`, `[userId, projectId]`
+   - Already indexed: `[userId, ruleType]`, `[userId, condition]`, `[userId, projectId]`
+   - Consider if needed: `[userId, confidenceScore]` for filtering by confidence threshold
 
 2. **Query Optimization**
    - Batch fetch rules for user (single query)
@@ -648,9 +659,10 @@ const handleSelect = (projectId: string, wasSuggestion: boolean) => {
 Based on codebase exploration, the following components are already in place:
 
 ### Database Schema ✅ COMPLETE
-- `CategoryRule` model fully defined
-- All necessary fields present (ruleType, condition, confidence, matchCount, accuracy)
-- Proper indexes for performance
+- `CategoryRule` model fully defined with enhanced fields
+- All necessary fields present (ruleType, condition, confidenceScore, matchCount, totalSuggestions, accuracy, lastMatchedAt)
+- `SuggestionLog` model for analytics tracking
+- Proper indexes for performance: `[userId, ruleType]`, `[userId, condition]`, `[userId, projectId]`
 - Relationships to User and Project models
 
 ### Configuration ✅ COMPLETE
@@ -661,7 +673,8 @@ Based on codebase exploration, the following components are already in place:
 
 ### Type Definitions ✅ COMPLETE
 - `CategoryRuleType` enum in `packages/shared/index.ts`
-- Four rule types defined: title_keyword, attendee_email, calendar_name, recurring_event
+- Five rule types defined: TITLE_KEYWORD, ATTENDEE_EMAIL, ATTENDEE_DOMAIN, CALENDAR_NAME, RECURRING_EVENT_ID
+- `SuggestionOutcome` enum: ACCEPTED, REJECTED, IGNORED
 
 ### API Endpoints 🚧 STUB EXISTS
 - `project.getSuggestions` endpoint exists but returns empty array
