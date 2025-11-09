@@ -50,12 +50,13 @@ async function main() {
     second: '2-digit',
   })
   const localParts = formatter.formatToParts(utcNow)
-  const offsetLabel = localParts.find(p) => p.type === 'timeZoneName')?.value ?? 'GMT+00'
+  const offsetLabel = localParts.find(p => p.type === 'timeZoneName')?.value ?? 'GMT+00'
   const offsetMatch = offsetLabel.match(/GMT([+-]\d{2})(?::?(\d{2}))?/)
   const offsetSign = offsetLabel.startsWith('GMT-') ? -1 : 1
-  const offsetHours = Number(offsetMatch?.[1]?.slice(1) ??'0')
+  const offsetHours = Number(offsetMatch?.[1]?.slice(1) ?? '0') 
   const offsetMinutes = Number(offsetMatch?.[2] ?? '0')
-  const userLocalNow = new Date(utcNow.getTime() + offsetMinutes * 60_000)
+  const totalOffsetMinutes = offsetSign * (offsetHours * 60 + offsetMinutes)
+  const userLocalNow = newDate(utcNow.getTime() + totalOffsetMinutes * 60_000) 
   const weekStart = getStartOfCurrentWeek()
 
   console.log('⏰ Time Calculations:')
