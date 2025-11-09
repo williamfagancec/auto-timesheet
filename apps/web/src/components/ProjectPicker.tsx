@@ -197,10 +197,9 @@ export function ProjectPicker({
                       key={project.id}
                       value={project.name}
                       onSelect={() => handleSelect(project.id)}
-                      className="flex items-center justify-between px-3 py-2 text-sm cursor-pointer hover:bg-gray-100 data-[selected=true]:bg-gray-100"
+                      className="flex items-center px-3 py-2 text-sm cursor-pointer hover:bg-gray-100 data-[selected=true]:bg-gray-100"
                     >
                       <span>{project.name}</span>
-                      <span className="text-xs text-gray-400">{project.useCount}x</span>
                     </Command.Item>
                   ))}
                 </Command.Group>
@@ -214,10 +213,9 @@ export function ProjectPicker({
                       key={project.id}
                       value={project.name}
                       onSelect={() => handleSelect(project.id)}
-                      className="flex items-center justify-between px-3 py-2 text-sm cursor-pointer hover:bg-gray-100 data-[selected=true]:bg-gray-100"
+                      className="flex items-center px-3 py-2 text-sm cursor-pointer hover:bg-gray-100 data-[selected=true]:bg-gray-100"
                     >
                       <span>{project.name}</span>
-                      <span className="text-xs text-gray-400">{project.useCount}x</span>
                     </Command.Item>
                   ))}
                 </Command.Group>
