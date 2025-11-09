@@ -11,8 +11,11 @@ import { describe, it, expect, beforeEach, afterAll } from 'vitest'
 import { PrismaClient } from '@prisma/client'
 import {
   getSuggestionsForEvent,
-  learnFromCategorization,
-  updateRuleAccuracy,
+  // learnFromCategorization, // TODO: Will be used in Phase 5 tests
+  // updateRuleAccuracy, // TODO: Will be used in Phase 5 tests
+  extractTitleKeywords,
+  extractAttendeePatterns,
+  extractPatternsFromEvent,
   type CalendarEventInput,
 } from '../ai-categorization'
 
@@ -21,13 +24,13 @@ const prisma = new PrismaClient()
 
 // Test data
 let testUserId: string
-let testProjectId: string
+// let testProjectId: string // TODO: Will be used in Phase 5 tests
 
 beforeEach(async () => {
   // TODO: Setup test database with fixtures
   // For now, these are placeholder IDs
   testUserId = 'test-user-id'
-  testProjectId = 'test-project-id'
+  // testProjectId = 'test-project-id'
 })
 
 afterAll(async () => {
@@ -35,22 +38,537 @@ afterAll(async () => {
 })
 
 // =============================================================================
-// PHASE 2: PATTERN EXTRACTION TESTS (To be implemented)
+// PHASE 2: PATTERN EXTRACTION TESTS
 // =============================================================================
 
-describe('Pattern Extraction', () => {
-  describe.todo('extractTitleKeywords', () => {
-    it.todo('should extract meaningful keywords from event title')
-    it.todo('should handle empty titles')
-    it.todo('should normalize to lowercase')
-    it.todo('should filter out stop words')
+describe('Phase 2: Pattern Extraction', () => {
+  describe('extractTitleKeywords', () => {
+    it('should extract meaningful keywords from event title', () => {
+      const result = extractTitleKeywords('Engineering Standup Meeting')
+      expect(result).toEqual(['engineering', 'standup'])
+    })
+
+    it('should normalize to lowercase', () => {
+      const result = extractTitleKeywords('PRODUCT DEMO')
+      expect(result).toEqual(['product', 'demo'])
+    })
+
+    it('should remove punctuation', () => {
+      const result = extractTitleKeywords('Q4 Planning: Client Review!')
+      expect(result).toEqual(['planning', 'client'])
+    })
+
+    it('should filter out stop words', () => {
+      const result = extractTitleKeywords('Weekly Meeting with the Team')
+      expect(result).toEqual(['team'])
+    })
+
+    it('should handle empty titles', () => {
+      expect(extractTitleKeywords('')).toEqual([])
+      expect(extractTitleKeywords('   ')).toEqual([])
+    })
+
+    it('should handle null/undefined titles gracefully', () => {
+      expect(extractTitleKeywords(null as any)).toEqual([])
+      expect(extractTitleKeywords(undefined as any)).toEqual([])
+    })
+
+    it('should return max 3 keywords', () => {
+      const result = extractTitleKeywords('Project Alpha Beta Gamma Delta Epsilon')
+      expect(result).toHaveLength(3)
+      expect(result).toEqual(['project', 'alpha', 'beta'])
+    })
+
+    it('should filter words shorter than 3 characters', () => {
+      const result = extractTitleKeywords('Go to NY for Q4')
+      expect(result).toEqual([])
+    })
+
+    it('should deduplicate keywords', () => {
+      const result = extractTitleKeywords('planning planning planning session')
+      expect(result).toEqual(['planning'])
+    })
+
+    it('should handle titles with only stop words', () => {
+      const result = extractTitleKeywords('meeting with a call')
+      expect(result).toEqual([])
+    })
+
+    // Additional comprehensive test cases
+    it('should extract keywords from "Website Redesign Planning Call"', () => {
+      const result = extractTitleKeywords('Website Redesign Planning Call')
+      expect(result).toEqual(['website', 'redesign', 'planning'])
+    })
+
+    it('should handle complex punctuation and special characters', () => {
+      expect(extractTitleKeywords('Q1-2024: Product@Launch (URGENT!)')).toEqual(['2024', 'product', 'launch'])
+      expect(extractTitleKeywords('Design//Development & Testing---Phase 1')).toEqual(['design', 'development', 'testing'])
+      expect(extractTitleKeywords('Client [Acme Corp] - Budget $50k')).toEqual(['client', 'acme', 'corp'])
+    })
+
+    it('should handle Unicode characters in titles', () => {
+      expect(extractTitleKeywords('Café Planning Session')).toEqual(['café', 'planning'])
+      expect(extractTitleKeywords('München Office Opening 🎉')).toEqual(['münchen', 'office', 'opening'])
+      expect(extractTitleKeywords('日本語 Meeting Notes')).toEqual(['日本語', 'notes'])
+    })
+
+    it('should handle mixed case with special characters', () => {
+      const result = extractTitleKeywords('API-Design: RESTful Endpoints (v2.0)')
+      expect(result).toEqual(['api', 'design', 'restful'])
+    })
+
+    it('should handle apostrophes and contractions', () => {
+      const result = extractTitleKeywords("Client's Quarterly Review - Don't Miss!")
+      expect(result).toEqual(['client', 'quarterly', 'don'])
+    })
+
+    it('should handle numbers and alphanumeric strings', () => {
+      expect(extractTitleKeywords('Sprint23 Retrospective')).toEqual(['sprint23', 'retrospective'])
+      expect(extractTitleKeywords('Version 2.5 Release Planning')).toEqual(['version', 'release', 'planning'])
+    })
+
+    it('should handle very long titles', () => {
+      const longTitle = 'Comprehensive Strategic Planning Session for Q4 Product Roadmap Development and Cross-Functional Team Alignment Initiative'
+      const result = extractTitleKeywords(longTitle)
+      expect(result).toHaveLength(3)
+      expect(result).toEqual(['comprehensive', 'strategic', 'planning'])
+    })
+
+    it('should handle titles with tabs and newlines', () => {
+      const result = extractTitleKeywords('Project\tKickoff\nMeeting')
+      expect(result).toEqual(['project', 'kickoff'])
+    })
+
+    it('should handle emojis and symbols', () => {
+      expect(extractTitleKeywords('🚀 Product Launch ⭐ Planning')).toEqual(['product', 'launch', 'planning'])
+      expect(extractTitleKeywords('★ VIP Client Meeting ★')).toEqual(['vip', 'client'])
+    })
   })
 
-  describe.todo('extractAttendeePatterns', () => {
-    it.todo('should extract email addresses')
-    it.todo('should extract email domains')
-    it.todo('should handle empty attendee list')
-    it.todo('should prioritize external domains')
+  describe('extractAttendeePatterns', () => {
+    it('should extract email addresses as ATTENDEE_EMAIL patterns', () => {
+      const result = extractAttendeePatterns([{ email: 'john@acme.com' }])
+      expect(result).toContainEqual({
+        ruleType: 'ATTENDEE_EMAIL',
+        condition: 'john@acme.com',
+      })
+    })
+
+    it('should extract email domains as ATTENDEE_DOMAIN patterns', () => {
+      const result = extractAttendeePatterns([{ email: 'john@acme.com' }])
+      expect(result).toContainEqual({
+        ruleType: 'ATTENDEE_DOMAIN',
+        condition: 'acme.com',
+      })
+    })
+
+    it('should normalize emails to lowercase', () => {
+      const result = extractAttendeePatterns([{ email: 'John@ACME.COM' }])
+      expect(result).toContainEqual({
+        ruleType: 'ATTENDEE_EMAIL',
+        condition: 'john@acme.com',
+      })
+      expect(result).toContainEqual({
+        ruleType: 'ATTENDEE_DOMAIN',
+        condition: 'acme.com',
+      })
+    })
+
+    it('should deduplicate email addresses', () => {
+      const result = extractAttendeePatterns([
+        { email: 'john@acme.com' },
+        { email: 'john@acme.com' },
+      ])
+      const emails = result.filter(p => p.ruleType === 'ATTENDEE_EMAIL')
+      expect(emails).toHaveLength(1)
+    })
+
+    it('should deduplicate domains across multiple attendees', () => {
+      const result = extractAttendeePatterns([
+        { email: 'john@acme.com' },
+        { email: 'jane@acme.com' },
+      ])
+      const domains = result.filter(p => p.ruleType === 'ATTENDEE_DOMAIN')
+      expect(domains).toHaveLength(1)
+      expect(domains[0].condition).toBe('acme.com')
+    })
+
+    it('should handle empty attendee list', () => {
+      expect(extractAttendeePatterns([])).toEqual([])
+      expect(extractAttendeePatterns(undefined)).toEqual([])
+    })
+
+    it('should skip invalid email formats', () => {
+      const result = extractAttendeePatterns([
+        { email: 'invalid-email' },
+        { email: 'valid@example.com' },
+      ])
+      expect(result).toHaveLength(2) // Only valid email and its domain
+      expect(result).toContainEqual({
+        ruleType: 'ATTENDEE_EMAIL',
+        condition: 'valid@example.com',
+      })
+    })
+
+    it('should handle multiple attendees from different domains', () => {
+      const result = extractAttendeePatterns([
+        { email: 'john@acme.com' },
+        { email: 'jane@globex.com' },
+      ])
+      expect(result).toHaveLength(4) // 2 emails + 2 domains
+      expect(result.filter(p => p.ruleType === 'ATTENDEE_DOMAIN')).toHaveLength(2)
+    })
+
+    // Additional comprehensive attendee tests
+    it('should handle various malformed email addresses', () => {
+      const result = extractAttendeePatterns([
+        { email: 'no-at-sign.com' },
+        { email: '@missing-local.com' },
+        { email: 'missing-domain@' },
+        { email: '' },
+        { email: '   ' },
+        { email: 'valid@example.com' },
+      ])
+      // Should only extract the valid email + domain
+      expect(result).toHaveLength(2)
+      expect(result).toContainEqual({
+        ruleType: 'ATTENDEE_EMAIL',
+        condition: 'valid@example.com',
+      })
+      expect(result).toContainEqual({
+        ruleType: 'ATTENDEE_DOMAIN',
+        condition: 'example.com',
+      })
+    })
+
+    it('should handle emails with special characters and subdomains', () => {
+      const result = extractAttendeePatterns([
+        { email: 'john.doe+tag@mail.acme.co.uk' },
+        { email: 'user_name@subdomain.company.com' },
+      ])
+      expect(result).toContainEqual({
+        ruleType: 'ATTENDEE_EMAIL',
+        condition: 'john.doe+tag@mail.acme.co.uk',
+      })
+      expect(result).toContainEqual({
+        ruleType: 'ATTENDEE_DOMAIN',
+        condition: 'mail.acme.co.uk',
+      })
+      expect(result).toContainEqual({
+        ruleType: 'ATTENDEE_DOMAIN',
+        condition: 'subdomain.company.com',
+      })
+    })
+
+    it('should handle null or undefined email field in attendee objects', () => {
+      const result = extractAttendeePatterns([
+        { email: null as any },
+        { email: undefined as any },
+        { email: 'valid@test.com' },
+        {} as any, // Missing email field
+      ])
+      expect(result).toHaveLength(2) // Only valid email + domain
+      expect(result.some(p => p.condition === 'valid@test.com')).toBe(true)
+    })
+
+    it('should handle large number of attendees efficiently', () => {
+      const manyAttendees = Array.from({ length: 100 }, (_, i) => ({
+        email: `user${i}@company.com`,
+      }))
+      const result = extractAttendeePatterns(manyAttendees)
+      // 100 unique emails + 1 domain (all same)
+      expect(result.filter(p => p.ruleType === 'ATTENDEE_EMAIL')).toHaveLength(100)
+      expect(result.filter(p => p.ruleType === 'ATTENDEE_DOMAIN')).toHaveLength(1)
+      expect(result.filter(p => p.ruleType === 'ATTENDEE_DOMAIN')[0].condition).toBe('company.com')
+    })
+
+    it('should handle emails with uppercase domains correctly', () => {
+      const result = extractAttendeePatterns([
+        { email: 'User@COMPANY.COM' },
+        { email: 'another@Company.Com' },
+      ])
+      const emails = result.filter(p => p.ruleType === 'ATTENDEE_EMAIL')
+      const domains = result.filter(p => p.ruleType === 'ATTENDEE_DOMAIN')
+
+      expect(emails).toHaveLength(2)
+      expect(emails.every(e => e.condition === e.condition.toLowerCase())).toBe(true)
+      expect(domains).toHaveLength(1) // Same domain (normalized)
+      expect(domains[0].condition).toBe('company.com')
+    })
+
+    it('should handle attendees with whitespace in emails', () => {
+      const result = extractAttendeePatterns([
+        { email: '  user@test.com  ' },
+        { email: 'another@test.com' },
+      ])
+      const emails = result.filter(p => p.ruleType === 'ATTENDEE_EMAIL')
+      expect(emails).toHaveLength(2)
+      expect(emails.some(e => e.condition === 'user@test.com')).toBe(true)
+    })
+  })
+
+  describe('extractPatternsFromEvent', () => {
+    it('should extract all pattern types from complete event', () => {
+      const event: CalendarEventInput = {
+        id: 'evt_123',
+        title: 'Engineering Standup',
+        attendees: [{ email: 'team@acme.com' }],
+        calendarId: 'primary',
+        googleEventId: 'recurring_abc123',
+      }
+
+      const result = extractPatternsFromEvent(event)
+
+      // Should have: 2 title keywords + 1 email + 1 domain + 1 calendar + 1 recurring = 6 patterns
+      expect(result.length).toBeGreaterThanOrEqual(4)
+      expect(result).toContainEqual({ ruleType: 'TITLE_KEYWORD', condition: 'engineering' })
+      expect(result).toContainEqual({ ruleType: 'ATTENDEE_EMAIL', condition: 'team@acme.com' })
+      expect(result).toContainEqual({ ruleType: 'ATTENDEE_DOMAIN', condition: 'acme.com' })
+      expect(result).toContainEqual({ ruleType: 'CALENDAR_NAME', condition: 'primary' })
+      expect(result).toContainEqual({ ruleType: 'RECURRING_EVENT_ID', condition: 'recurring_abc123' })
+    })
+
+    it('should extract patterns from event with only title', () => {
+      const event: CalendarEventInput = {
+        id: 'evt_123',
+        title: 'Product Demo',
+      }
+
+      const result = extractPatternsFromEvent(event)
+
+      expect(result).toHaveLength(2) // Just title keywords
+      expect(result).toContainEqual({ ruleType: 'TITLE_KEYWORD', condition: 'product' })
+      expect(result).toContainEqual({ ruleType: 'TITLE_KEYWORD', condition: 'demo' })
+    })
+
+    it('should extract patterns from event with only attendees', () => {
+      const event: CalendarEventInput = {
+        id: 'evt_123',
+        title: 'Meeting', // Stop word, will be filtered
+        attendees: [{ email: 'john@acme.com' }],
+      }
+
+      const result = extractPatternsFromEvent(event)
+
+      expect(result).toHaveLength(2) // Just email + domain (title has no keywords)
+      expect(result).toContainEqual({ ruleType: 'ATTENDEE_EMAIL', condition: 'john@acme.com' })
+      expect(result).toContainEqual({ ruleType: 'ATTENDEE_DOMAIN', condition: 'acme.com' })
+    })
+
+    it('should handle event with missing optional fields', () => {
+      const event: CalendarEventInput = {
+        id: 'evt_123',
+        title: 'Quick Chat',
+        // No attendees, calendarId, or googleEventId
+      }
+
+      const result = extractPatternsFromEvent(event)
+
+      expect(result).toHaveLength(1) // Just "quick" keyword
+      expect(result).toContainEqual({ ruleType: 'TITLE_KEYWORD', condition: 'quick' })
+    })
+
+    it('should return empty array when no patterns can be extracted', () => {
+      const event: CalendarEventInput = {
+        id: 'evt_123',
+        title: 'Call', // Stop word
+        attendees: [],
+      }
+
+      const result = extractPatternsFromEvent(event)
+
+      expect(result).toEqual([])
+    })
+
+    it('should handle event with null googleEventId', () => {
+      const event: CalendarEventInput = {
+        id: 'evt_123',
+        title: 'Team Sync',
+        googleEventId: null,
+      }
+
+      const result = extractPatternsFromEvent(event)
+
+      // Should have title keywords, but no RECURRING_EVENT_ID pattern
+      expect(result.some(p => p.ruleType === 'RECURRING_EVENT_ID')).toBe(false)
+      expect(result).toContainEqual({ ruleType: 'TITLE_KEYWORD', condition: 'team' })
+    })
+
+    // Additional comprehensive integration tests
+    it('should extract patterns from real-world event: "Website Redesign Planning Call"', () => {
+      const event: CalendarEventInput = {
+        id: 'evt_real_world',
+        title: 'Website Redesign Planning Call',
+        attendees: [
+          { email: 'designer@acme.com' },
+          { email: 'developer@acme.com' },
+        ],
+        calendarId: 'work-calendar',
+        googleEventId: 'recurring_weekly_123',
+      }
+
+      const result = extractPatternsFromEvent(event)
+
+      // Verify title keywords
+      expect(result).toContainEqual({ ruleType: 'TITLE_KEYWORD', condition: 'website' })
+      expect(result).toContainEqual({ ruleType: 'TITLE_KEYWORD', condition: 'redesign' })
+      expect(result).toContainEqual({ ruleType: 'TITLE_KEYWORD', condition: 'planning' })
+
+      // Verify attendee patterns
+      expect(result).toContainEqual({ ruleType: 'ATTENDEE_EMAIL', condition: 'designer@acme.com' })
+      expect(result).toContainEqual({ ruleType: 'ATTENDEE_EMAIL', condition: 'developer@acme.com' })
+      expect(result).toContainEqual({ ruleType: 'ATTENDEE_DOMAIN', condition: 'acme.com' })
+
+      // Verify calendar pattern
+      expect(result).toContainEqual({ ruleType: 'CALENDAR_NAME', condition: 'work-calendar' })
+
+      // Verify recurring pattern
+      expect(result).toContainEqual({ ruleType: 'RECURRING_EVENT_ID', condition: 'recurring_weekly_123' })
+
+      // Total patterns: 3 keywords + 2 emails + 1 domain + 1 calendar + 1 recurring = 8
+      expect(result).toHaveLength(8)
+    })
+
+    it('should handle event with Unicode title and international emails', () => {
+      const event: CalendarEventInput = {
+        id: 'evt_intl',
+        title: 'Café Planning: München Office 🚀',
+        attendees: [
+          { email: 'françois@société.fr' },
+          { email: 'müller@firma.de' },
+        ],
+      }
+
+      const result = extractPatternsFromEvent(event)
+
+      expect(result).toContainEqual({ ruleType: 'TITLE_KEYWORD', condition: 'café' })
+      expect(result).toContainEqual({ ruleType: 'TITLE_KEYWORD', condition: 'planning' })
+      expect(result).toContainEqual({ ruleType: 'TITLE_KEYWORD', condition: 'münchen' })
+      expect(result).toContainEqual({ ruleType: 'ATTENDEE_EMAIL', condition: 'françois@société.fr' })
+      expect(result).toContainEqual({ ruleType: 'ATTENDEE_EMAIL', condition: 'müller@firma.de' })
+    })
+
+    it('should handle event with malformed data gracefully', () => {
+      const event: CalendarEventInput = {
+        id: 'evt_malformed',
+        title: '!!!@@@###',
+        attendees: [
+          { email: 'invalid-email' },
+          { email: '' },
+          { email: null as any },
+        ],
+        calendarId: '',
+      }
+
+      const result = extractPatternsFromEvent(event)
+
+      // Should return empty array or minimal patterns (no keywords extracted, no valid emails)
+      expect(result).toEqual([])
+    })
+
+    it('should handle event with very long title and many attendees', () => {
+      const longTitle = 'Quarterly Business Review and Strategic Planning Initiative for Product Development and Market Expansion Analysis'
+      const manyAttendees = Array.from({ length: 50 }, (_, i) => ({
+        email: `attendee${i}@company.com`,
+      }))
+
+      const event: CalendarEventInput = {
+        id: 'evt_large',
+        title: longTitle,
+        attendees: manyAttendees,
+        calendarId: 'primary',
+      }
+
+      const result = extractPatternsFromEvent(event)
+
+      // Should have max 3 title keywords
+      const titleKeywords = result.filter(p => p.ruleType === 'TITLE_KEYWORD')
+      expect(titleKeywords).toHaveLength(3)
+
+      // Should have 50 email patterns
+      const emailPatterns = result.filter(p => p.ruleType === 'ATTENDEE_EMAIL')
+      expect(emailPatterns).toHaveLength(50)
+
+      // Should have 1 domain pattern (all same domain)
+      const domainPatterns = result.filter(p => p.ruleType === 'ATTENDEE_DOMAIN')
+      expect(domainPatterns).toHaveLength(1)
+
+      // Should have 1 calendar pattern
+      expect(result).toContainEqual({ ruleType: 'CALENDAR_NAME', condition: 'primary' })
+    })
+
+    it('should handle event with mixed valid and invalid attendees', () => {
+      const event: CalendarEventInput = {
+        id: 'evt_mixed',
+        title: 'Team Standup',
+        attendees: [
+          { email: 'valid1@test.com' },
+          { email: 'no-at-sign' },
+          { email: 'valid2@test.com' },
+          { email: '@no-local' },
+          { email: 'valid3@another.com' },
+        ],
+      }
+
+      const result = extractPatternsFromEvent(event)
+
+      // Should only have patterns for valid emails
+      const validEmails = ['valid1@test.com', 'valid2@test.com', 'valid3@another.com']
+      validEmails.forEach(email => {
+        expect(result).toContainEqual({ ruleType: 'ATTENDEE_EMAIL', condition: email })
+      })
+
+      // Should not have patterns for invalid emails
+      expect(result.some(p => p.condition === 'no-at-sign')).toBe(false)
+      expect(result.some(p => p.condition === '@no-local')).toBe(false)
+    })
+
+    it('should handle event with empty string fields', () => {
+      const event: CalendarEventInput = {
+        id: 'evt_empty',
+        title: '',
+        attendees: [],
+        calendarId: '',
+        googleEventId: '',
+      }
+
+      const result = extractPatternsFromEvent(event)
+
+      // Should return empty array (no extractable patterns)
+      expect(result).toEqual([])
+    })
+
+    it('should deduplicate patterns correctly in full extraction', () => {
+      const event: CalendarEventInput = {
+        id: 'evt_dedup',
+        title: 'Planning Planning Planning',
+        attendees: [
+          { email: 'user@test.com' },
+          { email: 'user@test.com' }, // Duplicate email
+          { email: 'another@test.com' },
+        ],
+      }
+
+      const result = extractPatternsFromEvent(event)
+
+      // Title should only have "planning" once
+      const planningKeywords = result.filter(
+        p => p.ruleType === 'TITLE_KEYWORD' && p.condition === 'planning'
+      )
+      expect(planningKeywords).toHaveLength(1)
+
+      // Email "user@test.com" should only appear once
+      const userEmails = result.filter(
+        p => p.ruleType === 'ATTENDEE_EMAIL' && p.condition === 'user@test.com'
+      )
+      expect(userEmails).toHaveLength(1)
+
+      // Domain "test.com" should only appear once (even though 2 attendees have it)
+      const testDomains = result.filter(
+        p => p.ruleType === 'ATTENDEE_DOMAIN' && p.condition === 'test.com'
+      )
+      expect(testDomains).toHaveLength(1)
+    })
   })
 })
 
