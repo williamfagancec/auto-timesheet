@@ -11,7 +11,6 @@ import { Timesheet } from './pages/Timesheet'
 import { Projects } from './pages/Projects'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { Layout } from './components/Layout'
-import type { AppRouter } from '../../api/src/routers/index.js'
 
 // Global error handler for session invalidation
 let sessionInvalidatedCallback: (() => void) | null = null

@@ -38,7 +38,24 @@ async function main() {
   // 2. Show timezone calculations
   const timezone = connection.timezone || 'UTC'
   const utcNow = new Date()
-  const userLocalNow = getUserLocalNow(timezone)
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    hour12: false,
+    timeZoneName: 'shortOffset',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+  const localParts = formatter.formatToParts(utcNow)
+  const offsetLabel = localParts.find(p) => p.type === 'timeZoneName')?.value ?? 'GMT+00'
+  const offsetMatch = offsetLabel.match(/GMT([+-]\d{2})(?::?(\d{2}))?/)
+  const offsetSign = offsetLabel.startsWith('GMT-') ? -1 : 1
+  const offsetHours = Number(offsetMatch?.[1]?.slice(1) ??'0')
+  const offsetMinutes = Number(offsetMatch?.[2] ?? '0')
+  const userLocalNow = new Date(utcNow.getTime() + offsetMinutes * 60_000)
   const weekStart = getStartOfCurrentWeek()
 
   console.log('⏰ Time Calculations:')

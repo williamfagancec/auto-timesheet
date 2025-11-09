@@ -1,18 +1,15 @@
 import { useState, useEffect, useCallback } from 'react'
 import { trpc } from '../lib/trpc'
-import { DateRangeSelector } from '../components/DateRangeSelector'
-import { DateRange, getDateRangeForPreset, groupByDate, formatTime, formatDuration } from '../lib/dateUtils'
+import { groupByDate, formatTime, formatDuration } from '../lib/dateUtils'
 import { ProjectPicker } from '../components/ProjectPicker'
-import { format } from 'date-fns'
+import { format, startOfWeek, endOfWeek, addWeeks, subWeeks } from 'date-fns'
 import { useQueryClient } from '@tanstack/react-query'
 
 export function Events() {
   const queryClient = useQueryClient()
 
-  const [dateRange, setDateRange] = useState<DateRange>(() => {
-    const range = getDateRangeForPreset('this-week')
-    return range || { startDate: new Date(), endDate: new Date() }
-  })
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }))
+  const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 })
 
   // No longer need categorization state - auto-save on selection
 
@@ -53,8 +50,8 @@ export function Events() {
     isLoading: eventsLoading,
     refetch: refetchEvents,
   } = trpc.calendar.getEventsWithStatus.useQuery({
-    startDate: dateRange.startDate.toISOString(),
-    endDate: dateRange.endDate.toISOString(),
+    startDate: weekStart.toISOString(),
+    endDate: weekEnd.toISOString(),
   })
 
   // No mapping needed - events already have correct shape from the API
@@ -105,6 +102,19 @@ export function Events() {
     syncMutation.mutate()
   }, [syncMutation])
 
+  // Week navigation handlers
+  const handlePrevWeek = () => {
+    setWeekStart((prev) => subWeeks(prev, 1))
+  }
+
+  const handleNextWeek = () => {
+    setWeekStart((prev) => addWeeks(prev, 1))
+  }
+
+  const handleThisWeek = () => {
+    setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))
+  }
+
   // Group events by date
   const eventsWithDates = events.map((e: any) => ({
     ...e,
@@ -117,6 +127,10 @@ export function Events() {
 
   // Count uncategorized
   const uncategorizedCount = events.filter((e: any) => !e.isCategorized && !e.isSkipped).length
+
+  // Check if viewing current week
+  const isThisWeek =
+    format(weekStart, 'yyyy-MM-dd') === format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
 
   // Handle calendar selection save
   const handleSaveCalendarSelection = () => {
@@ -207,30 +221,54 @@ export function Events() {
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Events</h1>
             <p className="text-gray-600 mt-2">
-              {format(dateRange.startDate, 'MMMM d')} - {format(dateRange.endDate, 'MMMM d, yyyy')}
+              {format(weekStart, 'MMMM d')} - {format(weekEnd, 'MMMM d, yyyy')}
+              {isThisWeek && <span className="ml-2 text-sm text-blue-600 font-medium">(This week)</span>}
             </p>
           </div>
-          <button
-            onClick={handleSync}
-            disabled={syncMutation.isPending}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 flex items-center gap-2"
-          >
-            {syncMutation.isPending ? (
-              <>
-                <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
-                Syncing...
-              </>
-            ) : (
-              '🔄 Sync Calendar'
-            )}
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Week Navigation */}
+            <button
+              onClick={handlePrevWeek}
+              className="px-3 py-2 border rounded-md hover:bg-gray-50"
+            >
+              ← Prev
+            </button>
+            <button
+              onClick={handleThisWeek}
+              disabled={isThisWeek}
+              className="px-4 py-2 border rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              This Week
+            </button>
+            <button
+              onClick={handleNextWeek}
+              className="px-3 py-2 border rounded-md hover:bg-gray-50"
+            >
+              Next →
+            </button>
+            {/* Sync Button */}
+            <button
+              onClick={handleSync}
+              disabled={syncMutation.isPending}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 flex items-center gap-2 ml-2"
+            >
+              {syncMutation.isPending ? (
+                <>
+                  <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
+                  Syncing...
+                </>
+              ) : (
+                '🔄 Sync Calendar'
+              )}
+            </button>
+          </div>
         </div>
 
         <div className="bg-white p-12 rounded-lg border text-center">
           <div className="text-6xl mb-4">📅</div>
           <h2 className="text-2xl font-bold text-gray-900 mb-2">No Events Found</h2>
           <p className="text-gray-600">
-            No events found for this date range. Try syncing your calendar or selecting a different range.
+            No events found for this week. Try syncing your calendar or selecting a different week.
           </p>
         </div>
       </div>
@@ -244,28 +282,47 @@ export function Events() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Events</h1>
           <p className="text-gray-600 mt-2">
-            {format(dateRange.startDate, 'MMMM d')} - {format(dateRange.endDate, 'MMMM d, yyyy')}
+            {format(weekStart, 'MMMM d')} - {format(weekEnd, 'MMMM d, yyyy')}
+            {isThisWeek && <span className="ml-2 text-sm text-blue-600 font-medium">(This week)</span>}
           </p>
         </div>
-        <button
-          onClick={handleSync}
-          disabled={syncMutation.isPending}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 flex items-center gap-2"
-        >
-          {syncMutation.isPending ? (
-            <>
-              <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
-              Syncing...
-            </>
-          ) : (
-            '🔄 Sync Calendar'
-          )}
-        </button>
-      </div>
-
-      {/* Date Range Selector */}
-      <div className="mb-8">
-        <DateRangeSelector selectedRange={dateRange} onRangeChange={setDateRange} />
+        <div className="flex items-center gap-2">
+          {/* Week Navigation */}
+          <button
+            onClick={handlePrevWeek}
+            className="px-3 py-2 border rounded-md hover:bg-gray-50"
+          >
+            ← Prev
+          </button>
+          <button
+            onClick={handleThisWeek}
+            disabled={isThisWeek}
+            className="px-4 py-2 border rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            This Week
+          </button>
+          <button
+            onClick={handleNextWeek}
+            className="px-3 py-2 border rounded-md hover:bg-gray-50"
+          >
+            Next →
+          </button>
+          {/* Sync Button */}
+          <button
+            onClick={handleSync}
+            disabled={syncMutation.isPending}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 flex items-center gap-2 ml-2"
+          >
+            {syncMutation.isPending ? (
+              <>
+                <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
+                Syncing...
+              </>
+            ) : (
+              '🔄 Sync Calendar'
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Status Info */}

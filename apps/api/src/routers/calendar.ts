@@ -203,10 +203,10 @@ export const calendarRouter = router({
           userId: ctx.user.id,
           isDeleted: false,
           startTime: {
-            gte: startDate,
+            lt: endDate,
           },
           endTime: {
-            lt: endDate,
+            gt: startDate,
           },
         },
         include: {
