@@ -915,7 +915,7 @@ export {
   // Phase 2: Pattern extraction
   extractTitleKeywords,
   extractAttendeePatterns,
-  extractPatternsFromEvent,
+  // extractPatternsFromEvent is now exported at function declaration (line 390)
   // Phase 3: Confidence calculation
   calculateRuleConfidence,
   calculateCombinedConfidence,
