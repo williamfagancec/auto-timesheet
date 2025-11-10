@@ -112,7 +112,7 @@ export class SuggestionEngine {
 
     suggestions.sort((a, b) => b.confidence - a.confidence)
     const top = suggestions[0]
-    if (top.confidence <= this.threshold) return null
+    if (top.confidence < this.threshold) return null
 
     const reasoningSet = new Set<string>()
     for (const rule of top.rules) reasoningSet.add(this.reasoningForRule(rule))

@@ -787,20 +787,34 @@ function matchAttendeeEmail(rule: CategoryRule, event: CalendarEventInput): bool
 
     const normalizedCondition = rule.condition.toLowerCase().trim()
 
-    return event.attendees.some((attendee) => {
-      const normalizedEmail = attendee.email.toLowerCase().trim()
+    return event.attendees.some(attendee => {
+      const email = attendee?.email?
+      if (typeof email !== 'string') {
+        return false
+      }
+
+      const normalizedEmail = email.toLowerCase().trim()
+      if (!normalizedEmail) {
+        return false
+      }
 
       if (rule.ruleType === 'ATTENDEE_EMAIL') {
         // Exact email match
         return normalizedEmail === normalizedCondition
-      } else if (rule.ruleType === 'ATTENDEE_DOMAIN') {
-        // Domain match - extract domain from email
-        const domain = normalizedEmail.split('@')[1]
+      } 
+
+      if (rule.ruleType === 'ATTENDEE_DOMAIN') {
+        const atIndex = normalizedEmail.indexOf('@')
+        if (atIndex === -1 || atIndex === normalizedEmail.length - 1) {
+          return false
+        }
+        const domain = normalizedEmail.slice(atIndex + 1)
         return domain === normalizedCondition
       }
 
       return false
     })
+
   } catch (error) {
     console.error('[AI] Attendee matching error:', error)
     return false
