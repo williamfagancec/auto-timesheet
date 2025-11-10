@@ -110,8 +110,12 @@ export async function getSuggestionsForEvent(
 ): Promise<ProjectSuggestion[]> {
   try {
     // Step 1: Fetch all active rules for user (with project relation)
+    // Filter out rules for archived projects
     const rules = await prisma.categoryRule.findMany({
-      where: { userId },
+      where: {
+        userId,
+        project: { isArchived: false },
+      },
       include: { project: true },
     })
 
@@ -387,7 +391,7 @@ function extractAttendeePatterns(
  *
  * @internal
  */
-function extractPatternsFromEvent(event: CalendarEventInput): ExtractedPattern[] {
+export function extractPatternsFromEvent(event: CalendarEventInput): ExtractedPattern[] {
   try {
     const patterns: ExtractedPattern[] = []
 
@@ -788,7 +792,7 @@ function matchAttendeeEmail(rule: CategoryRule, event: CalendarEventInput): bool
     const normalizedCondition = rule.condition.toLowerCase().trim()
 
     return event.attendees.some(attendee => {
-      const email = attendee?.email?
+      const email = attendee?.email
       if (typeof email !== 'string') {
         return false
       }

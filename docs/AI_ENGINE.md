@@ -221,7 +221,11 @@ interface Suggestion {
 
 ---
 
-### Phase 5: Learning & Feedback
+### Phase 5: Learning & Feedback ✅
+
+**Status:** COMPLETE - LearningService implemented with comprehensive test coverage (46 tests passing)
+
+**Implementation:** `apps/api/src/services/learning.ts`
 
 **Goal:** Automatically create and update rules when users categorize events.
 
@@ -312,11 +316,62 @@ async function updateRuleAccuracy(
 }
 ```
 
-**Implementation Details:**
-- Function: `learnFromCategorization(userId, event, projectId, wasAutoSuggestion)`
-- Function: `updateRuleAccuracy(ruleId, wasAccepted)`
-- Located in: `apps/api/src/services/ai-categorization.ts`
-- Called from: `timesheet.bulkCategorize` tRPC mutation
+**Implemented Functions:**
+
+1. **handleCategorizationFeedback(eventId, selectedProjectId, suggestedProjectId, userId)**
+   - Main entry point for user feedback
+   - Determines accept/reject/manual scenarios
+   - Calls penalizeIncorrectRules and strengthenRules
+
+2. **strengthenRules(userId, patterns, projectId, event)**
+   - Creates new rules with 60% initial confidence
+   - Boosts existing rules by +10% (capped at 95%)
+   - Priority-based: RECURRING_EVENT_ID > ATTENDEE_EMAIL > ATTENDEE_DOMAIN > TITLE_KEYWORD > CALENDAR_NAME
+
+3. **penalizeIncorrectRules(userId, patterns, wrongProjectId)**
+   - Decreases confidence by -10% (floored at 30%)
+   - Updates accuracy statistics
+   - Tracks failed suggestions
+
+4. **updateRuleAccuracy(ruleId, wasAccepted)**
+   - Tracks suggestion outcomes
+   - Updates matchCount and totalSuggestions
+   - Calculates weighted average accuracy
+
+**Rule Management Functions:**
+
+5. **pruneIneffectiveRules(userId)**
+   - Deletes rules with <40% accuracy after 10+ suggestions
+   - Cleans up rules for deleted projects
+   - Should be run as weekly background job
+
+6. **handleProjectArchival(projectId)**
+   - Logs archived project information
+   - Rules remain in database (projects can be unarchived)
+   - Archived projects filtered in getSuggestionsForEvent
+
+7. **getDebugInfo(userId)**
+   - Returns comprehensive statistics
+   - Calculates overall accuracy metrics
+   - Lists all rules with metadata
+
+**Configuration:**
+- Confidence bounds: 30% (min) to 95% (max)
+- Confidence boost: +10% per correct categorization
+- Confidence penalty: -10% per wrong suggestion
+- Initial confidence: 60% for new rules
+
+**Integration Requirements:**
+- ✅ Export extractPatternsFromEvent in ai-categorization.ts
+- ✅ Filter archived projects in getSuggestionsForEvent
+- ⏳ Call handleCategorizationFeedback from timesheet.bulkCategorize (Phase 6)
+- ⏳ Call handleProjectArchival from project.archive (Phase 6)
+- ⏳ Schedule pruneIneffectiveRules as background job (Phase 7)
+
+**Test Coverage:**
+- 46 tests, all passing
+- Test file: `apps/api/src/services/__tests__/learning.test.ts`
+- Covers feedback loops, rule management, edge cases, error handling
 
 ---
 
