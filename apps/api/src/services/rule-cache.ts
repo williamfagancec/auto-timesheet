@@ -54,12 +54,16 @@ export class RuleCache {
     if (redisClient.isConnected()) {
       const cached = await redisClient.get<(CategoryRule & { project: Project })[]>(cacheKey)
       if (cached) {
+        const hydrated = cached.map(rule => ({
+          ...rule,
+          lastMatchedAt: rule.lastMatchedAt ? new Date(rule.lastMatchedAt) : null,
+        }))
         this.hits++
         this.redisHits++
         if (CACHE_CONFIG.logCacheHits) {
           console.log(`[RuleCache] Redis HIT for user: ${userId}`)
         }
-        return cached
+        return hydrated
       }
     }
 

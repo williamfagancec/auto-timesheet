@@ -75,9 +75,10 @@ export async function cleanupTestData(userId: string): Promise<void> {
     })
 
     // Step 8: Delete User
-    await prisma.user.delete({
+    await prisma.user.deleteMany({
       where: { id: userId },
     })
+    
   } catch (error) {
     console.error('[Test Cleanup] Error cleaning up test data:', error, { userId })
     throw error

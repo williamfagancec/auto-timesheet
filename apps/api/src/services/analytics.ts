@@ -345,8 +345,7 @@ export async function getProblematicPatterns(
       ],
     })
 
-    // Transform rules into problematic patterns with recommendations
-    return rules.map(rule => ({
+      const patterns = rules.map(rule => ({
       ruleId: rule.id,
       ruleType: rule.ruleType as CategoryRuleType,
       condition: rule.condition,
@@ -356,6 +355,15 @@ export async function getProblematicPatterns(
       acceptedCount: rule.matchCount,
       recommendation: generateRecommendation(rule),
     }))
+
+    await redisClient.set(
+      cachekey,
+      patterns,
+      CACHE_CONGIF.problematicPatternsTtlSeconds
+    )
+
+    return patterns
+    
   } catch (error) {
     console.error('[Analytics] Failed to get problematic patterns:', error, { userId })
     return [] // Return empty array on error

@@ -30,6 +30,7 @@ const feedbackInputSchema = z.object({
   eventId: z.string().cuid(),
   selectedProjectId: z.string().cuid(),
   suggestedProjectId: z.string().cuid().nullable().optional(),
+  suggestedConfidence: z.number().min(0).max(1).optional(),
 })
 
 // =============================================================================
@@ -248,27 +249,15 @@ export const suggestionsRouter = router({
                 ? 'ACCEPTED'
                 : 'REJECTED'
 
-            // Re-generate suggestion to get confidence score
-            const suggestions = await getSuggestionsForEvent(prisma, ctx.user.id, {
-              id: event.id,
-              title: event.title,
-              googleEventId: event.googleEventId,
-              calendarId: event.calendarId,
-              attendees: event.attendees as Array<{ email: string; responseStatus?: string }> | undefined,
-            })
-
-            // Find the suggestion for the suggested project
-            const matchingSuggestion = suggestions.find(
-              s => s.projectId === input.suggestedProjectId
-            )
-
-            if (matchingSuggestion) {
+            // Use confidence from input if available, otherwise skip logging
+            const confidence = input.suggestedConfidence
+            if (confidence !== undefined) {
               await logSuggestion(
                 prisma,
                 ctx.user.id,
                 input.eventId,
                 input.suggestedProjectId,
-                matchingSuggestion.confidence,
+                confidence,
                 outcome
               )
             }

@@ -208,8 +208,10 @@ async function adjustForAmbiguousPatterns(
         return !ambiguousKeywords.has(r.rule.condition) // Non-ambiguous keywords are strong
       })
 
-      if (hasStrongSignal || rules.length >= AI_CONFIG.minRuleTypesForAmbiguous) {
-        // Include all rules for this project
+      const uniqueRuleTypes = new Set(rules.map(r => r.rule.ruleType))
+
+      if (hasStrongSignal || uniqueRuleTypes.size >= AI_CONFIG.minUniqueRuleTypesForAmbiguity) {
+      // Include all rules for this project
         filteredRules.push(...rules)
       } else {
         console.log('[AI] Filtered project with only ambiguous keywords:', { projectId })
@@ -315,7 +317,22 @@ function resolveConflicts(suggestions: ProjectSuggestion[]): ProjectSuggestion[]
   }
 
   // Re-sort by adjusted confidence
-  adjustedSuggestions.sort((a, b) => b.confidence - a.confidence)
+  const mostRecentTimestamp = (suggestion: ProjectSuggestion): number => {
+    const timestamps = suggestion.matchingRules.map(rule => {
+      if (rule.lastMatchedAt instanceof Date) {
+        return rule.lastMatchedAt.getTime()
+      }
+      return rule.lastMatchedAt ? new Date(rule.lastMatchedAt).getTime() : 0
+    })
+    return Math.max(...timestamps, 0)
+  }
+
+  adjustedSuggestions.sort((a, b) => {
+    if (b.confidence !== a.confidence) {
+      return b.confidence - a.confidence
+    }
+    return mostRecentTimestamp(b) - mostRecentTimestamp(a)
+  })
 
   // Filter by minimum threshold again (some may have dropped below after penalty)
   const filtered = adjustedSuggestions.filter(
