@@ -237,8 +237,15 @@ describe('suggestionsRouter - Integration Tests', () => {
       })
 
       // Create matching rules
+      // ATTENDEE_EMAIL has weight 0.9, default confidence 0.7 → 0.9 * 0.7 = 0.63 > 0.5 ✓
       await createTestRule(user1.id, projEng.id, 'ATTENDEE_EMAIL', 'eng@company.com')
-      await createTestRule(user1.id, projMkt.id, 'TITLE_KEYWORD', 'campaign')
+      // TITLE_KEYWORD has weight 0.5, need high confidence to reach threshold
+      await createTestRule(user1.id, projMkt.id, 'TITLE_KEYWORD', 'campaign', {
+        confidenceScore: 0.95,
+        accuracy: 1.0,
+        matchCount: 5,
+        totalSuggestions: 5,
+      })
 
       // Call with batch of events
       const caller = suggestionsRouter.createCaller(ctx1)
@@ -1080,8 +1087,13 @@ describe('suggestionsRouter - Integration Tests', () => {
         attendees: undefined, // undefined
       })
 
+      // TITLE_KEYWORD has weight 0.5, so need high confidence + accuracy to reach 50% threshold
+      // Formula: 0.5 (weight) * 0.95 (confidence) * (1 + 0.3 * 1.0 (accuracy)) = 0.61
       await createTestRule(user1.id, project.id, 'TITLE_KEYWORD', 'solo', {
-        confidenceScore: 0.8,
+        confidenceScore: 0.95,
+        accuracy: 1.0,
+        matchCount: 5,
+        totalSuggestions: 5,
       })
 
       const caller = suggestionsRouter.createCaller(ctx1)
@@ -1096,17 +1108,25 @@ describe('suggestionsRouter - Integration Tests', () => {
     it('handles large batch of events efficiently', async () => {
       const project = await createTestProject(user1.id, 'Project A')
 
-      // Create 50 events with matching rules
-      const eventIds: string[] = []
-      for (let i = 0; i < 50; i++) {
-        const event = await createTestEvent(user1.id, `Event ${i}`, {
-          googleEventId: `recurring_${i}`,
-        })
-        eventIds.push(event.id)
+      // Create single rule that matches all events (more efficient than 50 separate rules)
+      // ATTENDEE_DOMAIN has weight 0.7, high enough to pass threshold with good confidence
+      await createTestRule(user1.id, project.id, 'ATTENDEE_DOMAIN', 'example.com', {
+        confidenceScore: 0.9,
+        accuracy: 0.95,
+        matchCount: 100,
+        totalSuggestions: 105,
+      })
 
-        // Create matching rule
-        await createTestRule(user1.id, project.id, 'RECURRING_EVENT_ID', `recurring_${i}`)
-      }
+      // Create 50 events in parallel (much faster than sequential)
+      // Pass unique googleEventIds to avoid constraint violations
+      const eventPromises = Array.from({ length: 50 }, (_, i) =>
+        createTestEvent(user1.id, `Event ${i}`, {
+          googleEventId: `recurring_batch_${i}`,
+          attendees: [{ email: `user${i}@example.com` }],
+        })
+      )
+      const events = await Promise.all(eventPromises)
+      const eventIds = events.map(e => e.id)
 
       const caller = suggestionsRouter.createCaller(ctx1)
       const result = await caller.generate({

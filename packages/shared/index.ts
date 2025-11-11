@@ -59,3 +59,6 @@ export function calculateWeekRange(date: Date): { start: Date; end: Date } {
 
   return { start, end }
 }
+
+// Redis client export
+export { RedisClient, redisClient } from './redis-client.js'

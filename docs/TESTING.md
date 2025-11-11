@@ -704,5 +704,216 @@ pnpm test ai-categorization.test.ts
 
 ---
 
-**Last Updated:** 2025-01-09
-**Status:** Phase 0 - Documentation Complete
+## Integration Test Infrastructure
+
+### Test Database Setup
+
+The project uses a separate test database to isolate test data from development/production databases.
+
+**1. Create Test Database:**
+```bash
+# Using local PostgreSQL
+createdb timetracker_test
+
+# Or modify the connection string in .env.test to point to your test database
+```
+
+**2. Configure Test Environment:**
+
+The `.env.test` file contains test-specific configuration:
+```bash
+DATABASE_URL="postgresql://user:password@localhost:5432/timetracker_test?connection_limit=20&pool_timeout=10"
+NODE_ENV="test"
+# ... other test values
+```
+
+**3. Run Migrations:**
+```bash
+# Apply schema to test database
+NODE_ENV=test pnpm --filter database db:push
+
+# Or use migrate deploy
+NODE_ENV=test npx prisma migrate deploy
+```
+
+### Test Utilities
+
+**Location:** `apps/api/src/test-utils/`
+
+The test-utils directory provides reusable fixtures, cleanup utilities, and pre-built scenarios:
+
+#### Fixtures (`test-utils/fixtures.ts`)
+```typescript
+import { createTestUser, createTestProject, createTestEvent, createTestRule } from '../test-utils'
+
+// Create test data
+const user = await createTestUser('test@example.com')
+const project = await createTestProject(user.id, 'Engineering')
+const event = await createTestEvent(user.id, 'Team Standup', {
+  attendees: [{ email: 'team@acme.com' }],
+  googleEventId: 'recurring_123',
+})
+const rule = await createTestRule(user.id, project.id, 'TITLE_KEYWORD', 'standup', {
+  confidenceScore: 0.8,
+  accuracy: 0.9,
+})
+```
+
+#### Cleanup (`test-utils/cleanup.ts`)
+```typescript
+import { cleanupTestData, disconnectPrisma } from '../test-utils'
+
+afterEach(async () => {
+  await cleanupTestData(testUser.id) // Deletes all data for user
+})
+
+afterAll(async () => {
+  await disconnectPrisma() // Close database connection
+})
+```
+
+#### Scenarios (`test-utils/scenarios.ts`)
+Pre-built test scenarios for edge cases:
+
+```typescript
+import {
+  createColdStartScenario,
+  createConflictingRulesScenario,
+  createAmbiguousKeywordScenario,
+  createArchivedProjectScenario,
+} from '../test-utils'
+
+// Cold start: user with 0-4 categorizations
+const { user, entries } = await createColdStartScenario(3)
+
+// Conflicting rules: multiple projects with similar confidence
+const scenario = await createConflictingRulesScenario()
+// Returns: { user, project1, project2, event, rules }
+
+// Ambiguous keyword: keyword maps to 3+ projects
+const ambiguous = await createAmbiguousKeywordScenario()
+// Returns: { user, projects, event, rules }
+
+// Archived project: event matches archived project rules
+const archived = await createArchivedProjectScenario()
+// Returns: { user, archivedProject, activeProject, event, archivedRules, activeRules }
+```
+
+### Edge Case Tests
+
+**Location:** `apps/api/src/services/__tests__/ai-categorization.test.ts`
+
+#### Cold Start Tests
+```typescript
+describe('Cold Start Handling', () => {
+  it('should return empty array when user has no categorizations', async () => {
+    const scenario = await createColdStartScenario(0)
+    const suggestions = await getSuggestionsForEvent(prisma, scenario.user.id, event)
+    expect(suggestions).toEqual([]) // No suggestions for new users
+  })
+
+  it('should return suggestions when user has 5+ categorizations', async () => {
+    const scenario = await createColdStartScenario(5)
+    // Create matching rule...
+    const suggestions = await getSuggestionsForEvent(prisma, scenario.user.id, event)
+    expect(suggestions.length).toBeGreaterThan(0)
+  })
+})
+```
+
+#### Conflicting Rules Tests
+```typescript
+describe('Conflicting Rules Resolution', () => {
+  it('should handle conflicting rules from multiple projects', async () => {
+    const scenario = await createConflictingRulesScenario()
+    const suggestions = await getSuggestionsForEvent(prisma, scenario.user.id, scenario.event)
+
+    // Verify conflict resolution (penalty + recency tiebreaker)
+    if (suggestions.length > 1) {
+      expect(suggestions[0].confidence).toBeGreaterThanOrEqual(suggestions[1].confidence)
+    }
+  })
+})
+```
+
+#### Ambiguous Pattern Tests
+```typescript
+describe('Ambiguous Pattern Detection', () => {
+  it('should apply penalty for ambiguous keywords', async () => {
+    const scenario = await createAmbiguousKeywordScenario()
+    // "meeting" maps to 4 projects (ambiguous)
+    const suggestions = await getSuggestionsForEvent(prisma, scenario.user.id, scenario.event)
+
+    // Suggestions based solely on ambiguous keywords should be filtered/penalized
+  })
+})
+```
+
+#### Archived Project Tests
+```typescript
+describe('Archived Project Handling', () => {
+  it('should not suggest archived projects', async () => {
+    const scenario = await createArchivedProjectScenario()
+    const suggestions = await getSuggestionsForEvent(prisma, scenario.user.id, scenario.event)
+
+    // Should only include active projects
+    expect(suggestions.every(s => !s.project.isArchived)).toBe(true)
+  })
+})
+```
+
+### Running Integration Tests
+
+**Run all tests:**
+```bash
+pnpm --filter api test
+```
+
+**Run specific test suite:**
+```bash
+npx vitest apps/api/src/services/__tests__/ai-categorization.test.ts
+```
+
+**Run edge case tests only:**
+```bash
+npx vitest apps/api/src/services/__tests__/ai-categorization.test.ts -t "Edge Cases"
+```
+
+**Run in watch mode:**
+```bash
+npx vitest apps/api/src/services/__tests__/ai-categorization.test.ts --watch
+```
+
+### Test Database Cleanup
+
+**Automatic Cleanup:**
+Each test suite uses `afterEach` hooks to clean up test data:
+```typescript
+afterEach(async () => {
+  if (testUser) {
+    await cleanupTestData(testUser.id)
+  }
+})
+```
+
+**Manual Cleanup:**
+If needed, you can manually clean the entire test database:
+```typescript
+import { cleanupAllTestData } from '../test-utils'
+
+// WARNING: Deletes ALL data in test database
+await cleanupAllTestData()
+```
+
+### Best Practices
+
+1. **Always use fixtures** instead of creating test data manually
+2. **Clean up after each test** to prevent data pollution
+3. **Use scenarios** for complex edge case setups
+4. **Run tests sequentially** (configured in vitest.config.ts) to avoid database conflicts
+5. **Never use production database** for tests (verify NODE_ENV=test)
+
+---
+
+**Last Updated:** 2025-11-11
+**Status:** Integration test infrastructure complete, edge case tests implemented

@@ -96,6 +96,7 @@ model CalendarEvent {
   @@unique([userId, googleEventId, splitIndex])
   @@index([userId, startTime])
   @@index([userId, isDeleted])
+  @@index([userId, startTime, endTime], map: "CalendarEvent_date_range_idx")
 }
 
 model TimesheetEntry {
@@ -139,6 +140,7 @@ model CategoryRule {
   @@index([userId, ruleType])
   @@index([userId, condition])
   @@index([userId, projectId])
+  @@index([userId, accuracy(sort: Desc), totalSuggestions(sort: Desc)], map: "CategoryRule_performance_idx")
 }
 
 model SuggestionLog {
@@ -157,4 +159,6 @@ model SuggestionLog {
   @@index([userId, outcome])
   @@index([userId, createdAt])
   @@index([eventId])
+  @@index([userId, createdAt, outcome, confidence], map: "SuggestionLog_analytics_idx")
+  @@index([userId, suggestedProjectId, createdAt], map: "SuggestionLog_project_idx")
 }

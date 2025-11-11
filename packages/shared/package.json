@@ -5,6 +5,7 @@
   "main": "./index.ts",
   "types": "./index.ts",
   "dependencies": {
+    "redis": "^4.6.12",
     "zod": "^3.22.4"
   },
   "devDependencies": {

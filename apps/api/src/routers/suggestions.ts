@@ -7,6 +7,7 @@ import {
   handleCategorizationFeedback,
   getDebugInfo,
 } from '../services/learning.js'
+import { logSuggestion, type SuggestionOutcome } from '../services/analytics.js'
 
 // =============================================================================
 // INPUT SCHEMAS
@@ -237,6 +238,48 @@ export const suggestionsRouter = router({
           input.suggestedProjectId ?? null,
           ctx.user.id
         )
+
+        // Log suggestion outcome for analytics (only if there was a suggestion)
+        if (input.suggestedProjectId) {
+          try {
+            // Determine outcome
+            const outcome: SuggestionOutcome =
+              input.suggestedProjectId === input.selectedProjectId
+                ? 'ACCEPTED'
+                : 'REJECTED'
+
+            // Re-generate suggestion to get confidence score
+            const suggestions = await getSuggestionsForEvent(prisma, ctx.user.id, {
+              id: event.id,
+              title: event.title,
+              googleEventId: event.googleEventId,
+              calendarId: event.calendarId,
+              attendees: event.attendees as Array<{ email: string; responseStatus?: string }> | undefined,
+            })
+
+            // Find the suggestion for the suggested project
+            const matchingSuggestion = suggestions.find(
+              s => s.projectId === input.suggestedProjectId
+            )
+
+            if (matchingSuggestion) {
+              await logSuggestion(
+                prisma,
+                ctx.user.id,
+                input.eventId,
+                input.suggestedProjectId,
+                matchingSuggestion.confidence,
+                outcome
+              )
+            }
+          } catch (logError) {
+            // Don't fail the request if logging fails
+            console.error('[Suggestions] Analytics logging error:', logError, {
+              userId: ctx.user.id,
+              eventId: input.eventId,
+            })
+          }
+        }
 
         // Get rules AFTER feedback (for counting)
         const rulesAfter = await prisma.categoryRule.count({
