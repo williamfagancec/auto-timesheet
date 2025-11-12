@@ -7,6 +7,7 @@ import {
   handleCategorizationFeedback,
   getDebugInfo,
 } from '../services/learning.js'
+import { logSuggestion, type SuggestionOutcome } from '../services/analytics.js'
 
 // =============================================================================
 // INPUT SCHEMAS
@@ -29,6 +30,7 @@ const feedbackInputSchema = z.object({
   eventId: z.string().cuid(),
   selectedProjectId: z.string().cuid(),
   suggestedProjectId: z.string().cuid().nullable().optional(),
+  suggestedConfidence: z.number().min(0).max(1).optional(),
 })
 
 // =============================================================================
@@ -237,6 +239,36 @@ export const suggestionsRouter = router({
           input.suggestedProjectId ?? null,
           ctx.user.id
         )
+
+        // Log suggestion outcome for analytics (only if there was a suggestion)
+        if (input.suggestedProjectId) {
+          try {
+            // Determine outcome
+            const outcome: SuggestionOutcome =
+              input.suggestedProjectId === input.selectedProjectId
+                ? 'ACCEPTED'
+                : 'REJECTED'
+
+            // Use confidence from input if available, otherwise skip logging
+            const confidence = input.suggestedConfidence
+            if (confidence !== undefined) {
+              await logSuggestion(
+                prisma,
+                ctx.user.id,
+                input.eventId,
+                input.suggestedProjectId,
+                confidence,
+                outcome
+              )
+            }
+          } catch (logError) {
+            // Don't fail the request if logging fails
+            console.error('[Suggestions] Analytics logging error:', logError, {
+              userId: ctx.user.id,
+              eventId: input.eventId,
+            })
+          }
+        }
 
         // Get rules AFTER feedback (for counting)
         const rulesAfter = await prisma.categoryRule.count({
