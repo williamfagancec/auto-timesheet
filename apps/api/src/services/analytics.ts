@@ -9,15 +9,10 @@
  */
 
 import { PrismaClient, CategoryRule, Project } from '@prisma/client'
-import { CategoryRuleType, redisClient } from 'shared'
+import { CategoryRuleType, redisClient, type SuggestionOutcome } from 'shared'
 import { CACHE_CONFIG, ANALYTICS_CONFIG as ANALYTICS_CONSTANTS } from 'config'
 
-/**
- * Suggestion outcome types
- *
- * Tracked in SuggestionLog when users interact with suggestions.
- */
-export type SuggestionOutcome = 'ACCEPTED' | 'REJECTED' | 'IGNORED'
+// SuggestionOutcome is imported from the shared package
 
 /**
  * Time range options for metrics calculation
