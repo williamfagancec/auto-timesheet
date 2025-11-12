@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { trpc } from '../lib/trpc'
 import { groupByDate, formatTime, formatDuration } from '../lib/dateUtils'
 import { ProjectPicker } from '../components/ProjectPicker'
+import { ReconnectCalendarModal } from '../components/ReconnectCalendarModal'
 import { format, startOfWeek, endOfWeek, addWeeks, subWeeks } from 'date-fns'
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -15,6 +16,10 @@ export function Events() {
 
   const [showCalendarSetup, setShowCalendarSetup] = useState(false)
   const [selectedCalendarIds, setSelectedCalendarIds] = useState<string[]>([])
+
+  // Reconnect modal state
+  const [showReconnectModal, setShowReconnectModal] = useState(false)
+  const [reconnectErrorMessage, setReconnectErrorMessage] = useState<string>()
 
   // Check calendar status
   const { data: calendarStatus } = trpc.calendar.status.useQuery()
@@ -72,7 +77,7 @@ export function Events() {
     },
   })
 
-  // Sync mutation
+  // Sync mutation with token error handling
   const syncMutation = trpc.calendar.sync.useMutation({
     onSuccess: (data) => {
       console.log('Sync completed:', data)
@@ -80,6 +85,20 @@ export function Events() {
     },
     onError: (error) => {
       console.error('Sync failed:', error)
+
+      // Check if this is a token-related error that needs reconnection
+      const errorMsg = error.message
+      const isTokenError =
+        errorMsg.includes('TOKEN') ||
+        errorMsg.includes('REFRESH') ||
+        errorMsg.includes('SESSION_INVALIDATED') ||
+        errorMsg.includes('CALENDAR_NOT_CONNECTED') ||
+        errorMsg.includes('ARCTIC_VALIDATION_ERROR')
+
+      if (isTokenError) {
+        setReconnectErrorMessage(errorMsg)
+        setShowReconnectModal(true)
+      }
     },
   })
 
@@ -472,6 +491,13 @@ export function Events() {
           <p className="text-sm text-red-600">{categorizeSingleMutation.error.message}</p>
         </div>
       )}
+
+      {/* Reconnect Calendar Modal */}
+      <ReconnectCalendarModal
+        isOpen={showReconnectModal}
+        onClose={() => setShowReconnectModal(false)}
+        errorMessage={reconnectErrorMessage}
+      />
     </div>
   )
 }

@@ -35,7 +35,8 @@
       "Bash(npx vitest:*)",
       "Bash(rm:*)",
       "Bash(NODE_ENV=test DATABASE_URL=\"postgresql://user:password@localhost:5432/timetracker_test?connection_limit=20&pool_timeout=10\" npx prisma migrate deploy:*)",
-      "Bash(NODE_ENV=test DATABASE_URL=\"postgresql://user:password@localhost:5432/timetracker_test?connection_limit=20&pool_timeout=10\" pnpm --filter database db:push:*)"
+      "Bash(NODE_ENV=test DATABASE_URL=\"postgresql://user:password@localhost:5432/timetracker_test?connection_limit=20&pool_timeout=10\" pnpm --filter database db:push:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

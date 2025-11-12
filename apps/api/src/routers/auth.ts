@@ -10,6 +10,7 @@ import { encrypt } from '../auth/encryption.js'
 import { generateCodeVerifier, generateState } from 'arctic'
 import { storeOAuthState } from '../auth/oauth-state-store.js'
 import { getUserTimezone } from '../services/google-calendar.js'
+import { syncUserEvents } from '../services/calendar-sync.js'
 
 export const authRouter = router({
   /**
@@ -251,17 +252,45 @@ export const authRouter = router({
           })
         }
 
-        // Encrypt tokens before storing
+        // Validate and encrypt tokens before storing
         let encryptedAccessToken: string
         let encryptedRefreshToken: string | null = null
 
+        // Log token status for debugging
+        const hasRefreshToken = !!tokens.refreshToken()
+        console.log('[OAuth] Token validation', {
+          userEmail: user.email,
+          hasAccessToken: !!tokens.accessToken(),
+          hasRefreshToken,
+          accessTokenLength: tokens.accessToken()?.length,
+          refreshTokenLength: tokens.refreshToken()?.length,
+        })
+
+        // Validate access token
+        if (!tokens.accessToken() || tokens.accessToken().trim().length === 0) {
+          console.error('[OAuth] Invalid access token: empty or null')
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Google returned an invalid access token',
+          })
+        }
+
         try {
           encryptedAccessToken = encrypt(tokens.accessToken())
+
           if (tokens.refreshToken()) {
+            // Validate refresh token before encrypting
+            if (tokens.refreshToken()!.trim().length === 0) {
+              console.error('[OAuth] Refresh token is empty string')
+              throw new Error('Refresh token is empty')
+            }
             encryptedRefreshToken = encrypt(tokens.refreshToken()!)
+            console.log('[OAuth] Successfully encrypted refresh token')
+          } else {
+            console.warn('[OAuth] No refresh token provided by Google - this may cause sync issues later')
           }
         } catch (encryptError) {
-          console.error('Token encryption failed:', encryptError)
+          console.error('[OAuth] Token encryption failed:', encryptError)
           throw new TRPCError({
             code: 'INTERNAL_SERVER_ERROR',
             message: 'Failed to encrypt OAuth tokens. Please check ENCRYPTION_KEY configuration.',
@@ -279,6 +308,17 @@ export const authRouter = router({
         }
 
         // Store encrypted calendar connection tokens
+        // Check if connection already exists to handle refresh token properly
+        const existingConnection = await prisma.calendarConnection.findUnique({
+          where: {
+            userId_provider: {
+              userId: user.id,
+              provider: 'google',
+            },
+          },
+          select: { refreshToken: true },
+        })
+
         await prisma.calendarConnection.upsert({
           where: {
             userId_provider: {
@@ -299,10 +339,18 @@ export const authRouter = router({
             expiresAt: tokens.accessTokenExpiresAt(),
             timezone,
             // CRITICAL: Only update refresh token if Google provided a new one
-            // Otherwise, preserve the existing refresh token in the database
-            // (Google only returns refresh tokens on first consent or when prompt=consent)
-            ...(encryptedRefreshToken && { refreshToken: encryptedRefreshToken }),
+            // If no new refresh token and no existing one, this is a problem
+            // Otherwise, preserve the existing refresh token
+            refreshToken: encryptedRefreshToken || existingConnection?.refreshToken || null,
           },
+        })
+
+        // Log final status
+        console.log('[OAuth] Stored calendar connection', {
+          userEmail: user.email,
+          hasRefreshToken: !!(encryptedRefreshToken || existingConnection?.refreshToken),
+          isNewConnection: !existingConnection,
+          providedNewRefreshToken: !!encryptedRefreshToken,
         })
 
         // Create session
@@ -315,6 +363,31 @@ export const authRouter = router({
         ctx.res.clearCookie('google_code_verifier')
 
         console.log(`Successfully authenticated user ${user.email} via Google OAuth`)
+
+        // Trigger automatic calendar sync if user has selected calendars
+        // Run this in background - don't block OAuth flow if sync fails
+        const calendarConnection = await prisma.calendarConnection.findUnique({
+          where: {
+            userId_provider: {
+              userId: user.id,
+              provider: 'google',
+            },
+          },
+        })
+
+        if (calendarConnection?.selectedCalendarIds && (calendarConnection.selectedCalendarIds as string[]).length > 0) {
+          console.log(`Triggering automatic calendar sync for user ${user.email}`)
+          syncUserEvents(user.id)
+            .then((result) => {
+              console.log(`Auto-sync completed for ${user.email}: ${result.eventsCreated} created, ${result.eventsUpdated} updated`)
+            })
+            .catch((error) => {
+              console.error(`Auto-sync failed for ${user.email}:`, error)
+              // Don't fail the OAuth flow - sync can be retried manually
+            })
+        } else {
+          console.log(`Skipping auto-sync for ${user.email} - no calendars selected yet`)
+        }
 
         return {
           success: true,

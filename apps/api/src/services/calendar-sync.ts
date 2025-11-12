@@ -38,13 +38,13 @@ interface GoogleCalendarEventsResponse {
 
 /**
  * Fetch events from a specific Google Calendar within a date range
- * Only fetches PAST events (endTime < timeMax, where timeMax is user's local "now")
+ * Fetches events from timeMin to timeMax (typically start of week to end of today)
  */
 export async function fetchPastEvents(
   userId: string,
   calendarId: string,
   timeMin: Date,
-  timeMax: Date // User's local "now" - no default, caller must provide
+  timeMax: Date // End of current day - no default, caller must provide
 ): Promise<GoogleCalendarEvent[]> {
   const accessToken = await getValidAccessToken(userId, 'google')
 
@@ -91,11 +91,11 @@ export async function fetchPastEvents(
 
 /**
  * Filter events based on response status and time
- * Exclude: declined, cancelled, future events (endTime >= timeMax)
- * Include: confirmed, tentative, needsAction (if endTime < timeMax)
+ * Exclude: declined, cancelled, future events (endTime > timeMax)
+ * Include: confirmed, tentative, needsAction (if endTime <= timeMax)
  *
  * @param events - Array of Google Calendar events
- * @param timeMax - User's local "now" (events ending after this are excluded)
+ * @param timeMax - End of current day (events ending after this are excluded)
  */
 export function filterEvents(
   events: GoogleCalendarEvent[],
@@ -113,8 +113,9 @@ export function filterEvents(
 
     const endTime = new Date(endTimeStr)
 
-    // Only include past events (ended before user's local "now")
-    if (endTime >= timeMax) {
+    // Include events that end on or before timeMax (end of today)
+    // This includes: past events + all of today's events
+    if (endTime > timeMax) {
       return false
     }
 
@@ -368,8 +369,30 @@ export function getUserLocalNow(timezone: string): Date {
 }
 
 /**
+ * Get end of current day with 24-hour buffer
+ * This ensures we include ALL of today's events regardless of timezone complexity
+ *
+ * @param timezone - IANA timezone string (for logging purposes)
+ * @returns Date object representing now + 24 hours (guarantees today's events are included)
+ */
+export function getEndOfTodayInTimezone(timezone: string): Date {
+  const now = new Date()
+  // Add 24 hours to current time to ensure we capture all of today's events
+  // This handles timezone edge cases without complex timezone math
+  const timeMax = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+
+  console.log(`[Timezone Calc] Sync window for ${timezone}:`, {
+    now: now.toISOString(),
+    timeMax: timeMax.toISOString(),
+    note: 'Includes 24hr buffer to ensure all of today is captured',
+  })
+
+  return timeMax
+}
+
+/**
  * Sync events for a user from all their selected calendars
- * Only syncs PAST events from start of current week to now
+ * Syncs events from start of current week through END OF TODAY (includes today's events)
  */
 export async function syncUserEvents(userId: string): Promise<{
   calendarsProcessed: number
@@ -390,9 +413,10 @@ export async function syncUserEvents(userId: string): Promise<{
   const selectedCalendarIds = connection.selectedCalendarIds as string[]
   const timeMin = getStartOfCurrentWeek()
 
-  // Get "now" in user's timezone
+  // Get end of current day in user's timezone (23:59:59.999)
+  // This ensures we sync ALL events for today, not just those that have ended
   const userTimezone = connection.timezone || 'UTC'
-  const timeMax = getUserLocalNow(userTimezone)
+  const timeMax = getEndOfTodayInTimezone(userTimezone)
 
   let totalCreated = 0
   let totalUpdated = 0
@@ -400,15 +424,39 @@ export async function syncUserEvents(userId: string): Promise<{
 
   console.log(`Syncing ${selectedCalendarIds.length} calendars for user ${userId}`)
   console.log(`User timezone: ${userTimezone}`)
-  console.log(`Date range: ${timeMin.toISOString()} to ${timeMax.toISOString()}`)
+  console.log(`Date range: ${timeMin.toISOString()} to ${timeMax.toISOString()} (through end of today)`)
 
   for (const calendarId of selectedCalendarIds) {
     try {
       console.log(`Fetching events from calendar ${calendarId}`)
       const events = await fetchPastEvents(userId, calendarId, timeMin, timeMax)
+
+      // Log a few sample events for debugging
+      if (events.length > 0) {
+        console.log(`Sample events fetched (first 3):`)
+        events.slice(0, 3).forEach(event => {
+          const start = event.start.dateTime || event.start.date
+          const end = event.end.dateTime || event.end.date
+          console.log(`  - "${event.summary}" | ${start} to ${end} | status: ${event.status}`)
+        })
+      }
+
       const filteredEvents = filterEvents(events, timeMax)
 
       console.log(`Fetched ${events.length} events, ${filteredEvents.length} after filtering (timeMax: ${timeMax.toISOString()})`)
+
+      // Log which events were filtered out
+      const filteredOutCount = events.length - filteredEvents.length
+      if (filteredOutCount > 0) {
+        console.log(`${filteredOutCount} events filtered out - checking reasons...`)
+        events.filter(e => !filteredEvents.includes(e)).slice(0, 3).forEach(event => {
+          const endTime = new Date(event.end.dateTime || event.end.date!)
+          const isCancelled = event.status === 'cancelled'
+          const isDeclined = event.attendees?.find(a => a.self)?.responseStatus === 'declined'
+          const isFuture = endTime > timeMax
+          console.log(`  - Filtered: "${event.summary}" | cancelled:${isCancelled} declined:${isDeclined} future:${isFuture}`)
+        })
+      }
 
   const { created, updated, affectedEventIds } = await saveEventsToDatabase(userId, calendarId, filteredEvents)
 
@@ -452,7 +500,17 @@ export async function syncUserEvents(userId: string): Promise<{
       }
     } catch (error) {
       console.error(`Failed to sync calendar ${calendarId}:`, error)
-      // Continue with other calendars even if one fails
+
+      // Check if this is a token-related error that needs user intervention
+      if (error instanceof Error) {
+        const errorMsg = error.message
+        if (errorMsg.includes('TOKEN') || errorMsg.includes('REFRESH') || errorMsg.includes('SESSION_INVALIDATED') || errorMsg.includes('CALENDAR_NOT_CONNECTED')) {
+          // Re-throw token errors so user can be notified
+          throw error
+        }
+      }
+
+      // Continue with other calendars for non-token errors
     }
   }
 

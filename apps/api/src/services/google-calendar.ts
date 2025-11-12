@@ -21,7 +21,18 @@ export interface GoogleCalendarListResponse {
  * Fetch list of calendars from Google Calendar API
  */
 export async function listGoogleCalendars(userId: string): Promise<GoogleCalendar[]> {
-  const accessToken = await getValidAccessToken(userId, 'google')
+  let accessToken: string
+  try {
+    accessToken = await getValidAccessToken(userId, 'google')
+  } catch (tokenError) {
+    // Re-throw token errors with clear context
+    if (tokenError instanceof Error &&
+        (tokenError.message.includes('TOKEN') || tokenError.message.includes('REFRESH') ||
+         tokenError.message.includes('SESSION_INVALIDATED') || tokenError.message.includes('CALENDAR_NOT_CONNECTED'))) {
+      throw tokenError
+    }
+    throw new Error(`Failed to get calendar access token: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`)
+  }
 
   try {
     const response = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', {
@@ -97,7 +108,18 @@ export async function fetchCalendarEvents(
   timeMin: Date,
   timeMax: Date
 ) {
-  const accessToken = await getValidAccessToken(userId, 'google')
+  let accessToken: string
+  try {
+    accessToken = await getValidAccessToken(userId, 'google')
+  } catch (tokenError) {
+    // Re-throw token errors with clear context
+    if (tokenError instanceof Error &&
+        (tokenError.message.includes('TOKEN') || tokenError.message.includes('REFRESH') ||
+         tokenError.message.includes('SESSION_INVALIDATED') || tokenError.message.includes('CALENDAR_NOT_CONNECTED'))) {
+      throw tokenError
+    }
+    throw new Error(`Failed to get calendar access token: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`)
+  }
 
   const params = new URLSearchParams({
     timeMin: timeMin.toISOString(),
