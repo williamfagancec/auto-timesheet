@@ -44,10 +44,6 @@ describe('E2E: New User Flow', () => {
     }
   })
 
-  afterAll(async () => {
-    await prisma.$disconnect()
-    await disconnectPrisma()
-  })
 
   it('should guide user from cold start to learned patterns', async () => {
     // SETUP: Create user and two projects
@@ -249,6 +245,12 @@ describe('E2E: New User Flow', () => {
   })
 })
 
+// Top-level teardown: disconnect Prisma clients after all suites finish
+afterAll(async () => {
+  await prisma.$disconnect()
+  await disconnectPrisma()
+})
+
 // =============================================================================
 // TEST 2: FEEDBACK LOOP
 // =============================================================================
@@ -263,9 +265,6 @@ describe('E2E: Feedback Loop', () => {
     }
   })
 
-  afterAll(async () => {
-    await disconnectPrisma()
-  })
 
   it('should improve suggestion accuracy through accept/reject feedback', async () => {
     // SETUP: Create user, projects, and initial categorizations to exit cold start
@@ -418,9 +417,6 @@ describe('E2E: Performance Test', () => {
     }
   })
 
-  afterAll(async () => {
-    await disconnectPrisma()
-  })
 
   it('should handle 1000 events and generate suggestions without errors', async () => {
     // SETUP: Create user and projects

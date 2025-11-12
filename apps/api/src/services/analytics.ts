@@ -357,9 +357,9 @@ export async function getProblematicPatterns(
     }))
 
     await redisClient.set(
-      cachekey,
+      cacheKey,
       patterns,
-      CACHE_CONGIF.problematicPatternsTtlSeconds
+      CACHE_CONFIG.problematicPatternsTtlSeconds
     )
 
     return patterns
