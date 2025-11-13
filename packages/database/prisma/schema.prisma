@@ -38,16 +38,23 @@ model Session {
 }
 
 model CalendarConnection {
-  id                  String   @id @default(cuid())
+  id                  String    @id @default(cuid())
   userId              String
-  provider            String   @default("google")
+  provider            String    @default("google")
   accessToken         String
   refreshToken        String?
   expiresAt           DateTime?
-  selectedCalendarIds Json?    // Array of calendar IDs to sync
-  timezone            String   @default("UTC") // User's timezone (e.g., "Australia/Sydney")
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  selectedCalendarIds Json?     // Array of calendar IDs to sync
+  timezone            String    @default("UTC") // User's timezone (e.g., "Australia/Sydney")
+
+  // Diagnostic fields for token refresh monitoring
+  refreshTokenUpdatedAt DateTime? // When refresh token was last updated
+  lastRefreshAttempt    DateTime? // When we last attempted to refresh the access token
+  refreshFailureCount   Int       @default(0) // Count of consecutive refresh failures
+  lastRefreshError      String?   // Last error message from refresh attempt (for debugging)
+
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

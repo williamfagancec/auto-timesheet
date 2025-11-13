@@ -20,8 +20,23 @@ export async function refreshGoogleToken(refreshToken: string): Promise<{
   expiresAt: Date
   refreshToken?:string
 }> {
+  // Validate refresh token format before attempting refresh
+  if (!refreshToken || refreshToken.trim().length === 0) {
+    console.error('[Token Refresh] Invalid refresh token format: empty or null')
+    throw new Error('INVALID_REFRESH_TOKEN_FORMAT: Refresh token is empty')
+  }
+
+ console.log('[Token Refresh] Attempting refresh', {
+    refreshTokenLength: refreshToken.length,
+  })
+
   try {
     const tokens = await google.refreshAccessToken(refreshToken)
+
+    console.log('[Token Refresh] Success', {
+      hasNewRefreshToken: !!tokens.refreshToken(),
+      expiresAt: tokens.accessTokenExpiresAt(),
+    })
 
     return {
       accessToken: tokens.accessToken(),
@@ -29,11 +44,19 @@ export async function refreshGoogleToken(refreshToken: string): Promise<{
       ...(tokens.refreshToken() && { refreshToken: tokens.refreshToken() }),
     }
   } catch (error) {
-    console.error('Failed to refresh Google token:', error)
+    console.error('[Token Refresh] Failed', {
+      errorName: error instanceof Error ? error.name : 'Unknown',
+      errorMessage: error instanceof Error ? error.message : String(error),
+    })
 
     // Parse error for specific issues
     if (error instanceof Error) {
       const errorMsg = error.message.toLowerCase()
+
+      // Check for Arctic-specific error patterns
+      if (errorMsg.includes('missing') && errorMsg.includes('refresh_token')) {
+        throw new Error('ARCTIC_VALIDATION_ERROR: Arctic library validation failed - refresh token may be malformed')
+      }
 
       if (errorMsg.includes('invalid_grant') || errorMsg.includes('token has been expired or revoked')) {
         throw new Error('REFRESH_TOKEN_REVOKED: User needs to re-authenticate with Google')
@@ -48,7 +71,7 @@ export async function refreshGoogleToken(refreshToken: string): Promise<{
       }
     }
 
-    throw new Error('Failed to refresh access token. User may need to re-authenticate.')
+    throw new Error('REFRESH_FAILED: ' + (error instanceof Error ? error.message : String(error)))
   }
 }
 
@@ -71,29 +94,49 @@ export async function getValidAccessToken(
     throw new Error('CALENDAR_NOT_CONNECTED: No calendar connection found for user. Please connect your Google Calendar first.')
   }
 
+  console.log('[Token Validation]', {
+    userId,
+    hasRefreshToken: !!connection.refreshToken,
+    tokenExpired: connection.expiresAt ? isTokenExpired(connection.expiresAt) : true,
+    expiresAt: connection.expiresAt?.toISOString(),
+  })
+
   // Decrypt access token
   let accessToken: string
   try {
     accessToken = decrypt(connection.accessToken)
   } catch (decryptError) {
-    console.error('Failed to decrypt access token:', decryptError)
+    console.error('[Token Decryption] Failed for access token:', decryptError)
     throw new Error('TOKEN_DECRYPTION_ERROR: Failed to decrypt stored access token. User needs to re-authenticate.')
   }
 
   // Check if token needs refresh (if expiresAt is null, assume it's expired)
   if (!connection.expiresAt || isTokenExpired(connection.expiresAt)) {
     if (!connection.refreshToken) {
+      console.error('[Token Refresh] No refresh token available', {
+        userId,
+        connectionCreatedAt: connection.createdAt?.toISOString(),
+      })
       throw new Error('NO_REFRESH_TOKEN: No refresh token available. User needs to re-authenticate with Google.')
     }
 
-    console.log(`Token expired for user ${userId}, refreshing...`)
+    console.log(`[Token Refresh] Token expired for user ${userId}, refreshing...`)
 
     // Decrypt refresh token and get new access token
     let decryptedRefreshToken: string
     try {
       decryptedRefreshToken = decrypt(connection.refreshToken)
+
+      // Validate decrypted token format
+      if (!decryptedRefreshToken || decryptedRefreshToken.trim().length === 0) {
+        throw new Error('Decrypted refresh token is empty')
+      }
+
+      console.log('[Token Refresh] Decrypted refresh token', {
+        length: decryptedRefreshToken.length,
+      })
     } catch (decryptError) {
-      console.error('Failed to decrypt refresh token:', decryptError)
+      console.error('[Token Decryption] Failed for refresh token:', decryptError)
       throw new Error('TOKEN_DECRYPTION_ERROR: Failed to decrypt refresh token. User needs to re-authenticate.')
     }
 
