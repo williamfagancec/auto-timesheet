@@ -47,6 +47,12 @@ export function Layout({ children }: LayoutProps) {
                 >
                   Projects
                 </button>
+                <button
+                  onClick={() => navigate('/settings')}
+                  className="text-gray-700 hover:text-gray-900 px-3 py-2"
+                >
+                  Settings
+                </button>
               </nav>
             </div>
 

@@ -24,6 +24,7 @@ model User {
   calendars       CalendarConnection[]
   events          CalendarEvent[]
   suggestionLogs  SuggestionLog[]
+  rmConnection    RMConnection?
 }
 
 model Session {
@@ -75,6 +76,7 @@ model Project {
   entries         TimesheetEntry[]
   rules           CategoryRule[]
   suggestionLogs  SuggestionLog[]
+  rmMappings      RMProjectMapping[]
 
   @@index([userId, lastUsedAt])
 }
@@ -119,9 +121,10 @@ model TimesheetEntry {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  event   CalendarEvent? @relation(fields: [eventId], references: [id])
-  project Project?       @relation(fields: [projectId], references: [id])
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event         CalendarEvent?  @relation(fields: [eventId], references: [id])
+  project       Project?        @relation(fields: [projectId], references: [id])
+  rmSyncedEntry RMSyncedEntry?
 
   @@index([userId, date])
 }
@@ -168,4 +171,131 @@ model SuggestionLog {
   @@index([eventId])
   @@index([userId, createdAt, outcome, confidence], map: "SuggestionLog_analytics_idx")
   @@index([userId, suggestedProjectId, createdAt], map: "SuggestionLog_project_idx")
+}
+
+// RM (Resource Management by Smartsheet) Integration Models
+
+model RMConnection {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+
+  // Encrypted API token (AES-256-GCM)
+  encryptedToken   String
+  tokenIv          String
+  tokenAuthTag     String
+
+  // RM user info
+  rmUserId         Int      // User ID in RM system
+  rmUserEmail      String
+  rmUserName       String?
+
+  // Sync configuration
+  autoSyncEnabled  Boolean  @default(false)  // Future: auto-sync on entry save
+  lastSyncAt       DateTime?
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectMappings  RMProjectMapping[]
+  syncLogs         RMSyncLog[]
+
+  @@index([userId])
+}
+
+model RMProjectMapping {
+  id                String   @id @default(cuid())
+  connectionId      String
+
+  // time-tracker project
+  projectId         String
+
+  // RM project details
+  rmProjectId       Int
+  rmProjectName     String
+  rmProjectCode     String?
+
+  // Sync state
+  enabled           Boolean  @default(true)  // Allow users to temporarily disable
+  lastSyncedAt      DateTime?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  connection        RMConnection      @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  project           Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  syncedEntries     RMSyncedEntry[]
+
+  @@unique([connectionId, projectId])
+  @@unique([connectionId, rmProjectId])
+  @@index([connectionId])
+  @@index([projectId])
+}
+
+model RMSyncedEntry {
+  id                String   @id @default(cuid())
+  mappingId         String
+
+  // time-tracker entry
+  timesheetEntryId  String   @unique
+
+  // RM entry details
+  rmEntryId         Int      // ID returned by RM API
+  rmEntryUrl        String?  // Optional: deep link to RM entry
+
+  // Sync metadata
+  lastSyncedAt      DateTime
+  lastSyncedHash    String   // Hash of (date + hours + notes) to detect changes
+  syncVersion       Int      @default(1)  // Increment on each update
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  mapping           RMProjectMapping @relation(fields: [mappingId], references: [id], onDelete: Cascade)
+  timesheetEntry    TimesheetEntry   @relation(fields: [timesheetEntryId], references: [id], onDelete: Cascade)
+
+  @@index([mappingId])
+  @@index([timesheetEntryId])
+}
+
+model RMSyncLog {
+  id               String         @id @default(cuid())
+  connectionId     String
+
+  // Sync job details
+  jobId            String?        // BullMQ job ID (future)
+  status           RMSyncStatus
+  direction        RMSyncDirection  // PUSH (time-tracker → RM)
+
+  // Stats
+  entriesAttempted Int            @default(0)
+  entriesSuccess   Int            @default(0)
+  entriesFailed    Int            @default(0)
+  entriesSkipped   Int            @default(0)
+
+  // Error tracking
+  errorMessage     String?        @db.Text
+  errorDetails     Json?          // Detailed error info for debugging
+
+  startedAt        DateTime       @default(now())
+  completedAt      DateTime?
+
+  connection       RMConnection   @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId])
+  @@index([status])
+}
+
+enum RMSyncStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  PARTIAL  // Some entries succeeded, some failed
+}
+
+enum RMSyncDirection {
+  PUSH           // time-tracker → RM (MVP)
+  PULL           // RM → time-tracker (future)
+  BIDIRECTIONAL  // future
 }

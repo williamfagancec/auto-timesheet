@@ -9,6 +9,7 @@ import { AuthCallback } from './pages/AuthCallback'
 import { Events } from './pages/Events'
 import { Timesheet } from './pages/Timesheet'
 import { Projects } from './pages/Projects'
+import { Settings } from './pages/Settings'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { Layout } from './components/Layout'
 
@@ -97,6 +98,17 @@ function App() {
                 <ProtectedRoute>
                   <Layout>
                     <Projects />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <Settings />
                   </Layout>
                 </ProtectedRoute>
               }

@@ -379,25 +379,11 @@ export function getUserLocalNow(timezone: string): Date {
 export function getEndOfTodayInTimezone(timezone: string): Date {
   const now = new Date()
   try {
-    // Format current date in user's timezone
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: timezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    })
-
-    const parts = formatter.formatToParts(now)
-    const year = parts.find(p => p.type === 'year')?.value
-    const month = parts.find(p => p.type === 'month')?.value
-    const day = parts.find(p => p.type === 'day')?.value
-
-    // Construct end of day in user's timezone (23:59:59.999)
-    const endOfDayStr = `${year}-${month}-${day}T23:59:59.999Z`
-
-    // Create end-of-day timestamp
-    const endofDayLocal = new Date(endOfDayStr)
-    const timeMax = new Date(endofDayLocal)
+    
+    const localNow = new Date(now.toLocaleString('en-US', { timeZone: timezone }))
+    const tzOffsetMs = now.getTime() - localNow.getTime()
+    localNow.setHours(23, 59, 59, 999)
+    const timeMax = new Date(localNow.getTime() + tzOffsetMs)
 
     console.log(`[Timezone Calc] End of day for ${timezone}:`, {
       now: now.toISOString(),
