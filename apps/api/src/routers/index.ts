@@ -5,6 +5,7 @@ import { calendarRouter } from './calendar.js'
 import { timesheetRouter } from './timesheet.js'
 import { suggestionsRouter } from './suggestions.js'
 import { analyticsRouter } from './analytics.js'
+import { rmRouter } from './rm.js'
 
 export const appRouter = router({
   auth: authRouter,
@@ -13,6 +14,7 @@ export const appRouter = router({
   timesheet: timesheetRouter,
   suggestions: suggestionsRouter,
   analytics: analyticsRouter,
+  rm: rmRouter,
 })
 
 export type AppRouter = typeof appRouter
