@@ -10,6 +10,8 @@
 
 import { PrismaClient, CategoryRule, Project } from '@prisma/client'
 import { CategoryRuleType, redisClient, type SuggestionOutcome } from 'shared'
+
+export type { SuggestionOutcome } from 'shared'
 import { CACHE_CONFIG, ANALYTICS_CONFIG as ANALYTICS_CONSTANTS } from 'config'
 
 // SuggestionOutcome is imported from the shared package

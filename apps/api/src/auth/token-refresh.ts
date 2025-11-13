@@ -26,9 +26,8 @@ export async function refreshGoogleToken(refreshToken: string): Promise<{
     throw new Error('INVALID_REFRESH_TOKEN_FORMAT: Refresh token is empty')
   }
 
-  console.log('[Token Refresh] Attempting refresh', {
-    tokenLength: refreshToken.length,
-    tokenPrefix: refreshToken.substring(0, 10) + '...',
+ console.log('[Token Refresh] Attempting refresh', {
+    refreshTokenLength: refreshToken.length,
   })
 
   try {

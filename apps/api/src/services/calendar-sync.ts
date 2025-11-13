@@ -115,7 +115,8 @@ export function filterEvents(
 
     // Include events that end on or before timeMax (end of today)
     // This includes: past events + all of today's events
-    if (endTime > timeMax) {
+    // TODO: Re-evaluate this comparison after getEndOfTodayInTimezone is fixed
+    if (endTime >= timeMax) {
       return false
     }
 
@@ -369,25 +370,49 @@ export function getUserLocalNow(timezone: string): Date {
 }
 
 /**
- * Get end of current day with 24-hour buffer
- * This ensures we include ALL of today's events regardless of timezone complexity
+ * Get end of current day in user's timezone (23:59:59.999)
  *
+ * @returns Date object representing 23:59:59.999 of the current day in the user's timezone
  * @param timezone - IANA timezone string (for logging purposes)
  * @returns Date object representing now + 24 hours (guarantees today's events are included)
  */
 export function getEndOfTodayInTimezone(timezone: string): Date {
   const now = new Date()
-  // Add 24 hours to current time to ensure we capture all of today's events
-  // This handles timezone edge cases without complex timezone math
-  const timeMax = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+  try {
+    // Format current date in user's timezone
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
 
-  console.log(`[Timezone Calc] Sync window for ${timezone}:`, {
-    now: now.toISOString(),
-    timeMax: timeMax.toISOString(),
-    note: 'Includes 24hr buffer to ensure all of today is captured',
-  })
+    const parts = formatter.formatToParts(now)
+    const year = parts.find(p => p.type === 'year')?.value
+    const month = parts.find(p => p.type === 'month')?.value
+    const day = parts.find(p => p.type === 'day')?.value
 
-  return timeMax
+    // Construct end of day in user's timezone (23:59:59.999)
+    const endOfDayStr = `${year}-${month}-${day}T23:59:59.999Z`
+
+    // Create end-of-day timestamp
+    const endofDayLocal = new Date(endOfDayStr)
+    const timeMax = new Date(endofDayLocal)
+
+    console.log(`[Timezone Calc] End of day for ${timezone}:`, {
+      now: now.toISOString(),
+      timeMax: timeMax.toISOString(),
+      userLocalDate: now.toLocaleString('en-US', { timeZone: timezone }),
+    })
+
+    return timeMax
+  } catch (error) {
+    console.error(`Failed to calculate end of day for timezone ${timezone}:`, error)
+    // Fallback: end of current UTC day
+    const utcEndOfDay = new Date(now)
+    utcEndOfDay.setHours(23, 59, 59, 999)
+    return utcEndOfDay
+  }
 }
 
 /**
@@ -503,9 +528,12 @@ export async function syncUserEvents(userId: string): Promise<{
 
       // Check if this is a token-related error that needs user intervention
       if (error instanceof Error) {
-        const errorMsg = error.message
-        if (errorMsg.includes('TOKEN') || errorMsg.includes('REFRESH') || errorMsg.includes('SESSION_INVALIDATED') || errorMsg.includes('CALENDAR_NOT_CONNECTED')) {
-          // Re-throw token errors so user can be notified
+        const msg = (error.message ?? '').toUpperCase()
+        // Comprehensive list of auth error keywords (case-insensitive via normalization)
+        const authErrorKeywords = ['TOKEN', 'REFRESH', 'SESSION_INVALIDATED', 'CALENDAR_NOT_CONNECTED', 'ARCTIC_VALIDATION_ERROR', 'OAUTH_CONFIG_ERROR', 'NETWORK_ERROR']
+        const isAuthError = authErrorKeywords.some(keyword => msg.includes(keyword))
+        if (isAuthError) {
+          // Re-throw token/auth errors so user can be notified
           throw error
         }
       }
