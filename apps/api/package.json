@@ -36,6 +36,7 @@
     "lucia": "^3.0.1",
     "redis": "^4.6.12",
     "shared": "workspace:*",
+    "date-fns-tz": "^2.0.1",
     "zod": "^3.22.4"
   },
   "devDependencies": {

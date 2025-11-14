@@ -6,6 +6,11 @@
 const RM_BASE_URL = "https://api.rm.smartsheet.com/api/v1";
 
 /**
+ * Headers type for fetch requests
+ */
+type HeadersInit = Record<string, string>;
+
+/**
  * RM API Error Response
  */
 interface RMErrorResponse {
@@ -94,10 +99,10 @@ export class RMApiClient {
   ): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
 
-    const headers: HeadersInit = {
+    const headers: Record<string, string> = {
       "Content-Type": "application/json",
       auth: token,
-      ...options.headers,
+      ...(options.headers as Record<string, string>),
     };
 
     try {
@@ -116,7 +121,7 @@ export class RMApiClient {
 
       // Handle authentication errors (401, 403)
       if (response.status === 401 || response.status === 403) {
-        const errorData = await response.json().catch(() => ({}));
+        const errorData = (await response.json().catch(() => ({}))) as RMErrorResponse;
         throw new RMAuthError(
           errorData.error || errorData.message || "Invalid API token"
         );
@@ -149,30 +154,55 @@ export class RMApiClient {
 
       // Handle other error responses
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+        const errorData = (await response.json().catch(() => ({}))) as RMErrorResponse;
         throw new RMNetworkError(
-          errorData.error || errorData.message || `HTTP ${response.status}`
+          errorData.error || errorData.message || `HTTP error ${response.status}`
         );
       }
 
-      return await response.json();
-    } catch (error) {
-      // Re-throw our custom errors
-      if (error instanceof RMApiError) {
-        throw error;
+      const method = options.method?.toUpperCase();
+
+      if (
+        method === "HEAD" ||
+        response.status === 204 ||
+        response.status === 205 ||
+        response.status === 304
+      ) {
+        return undefined as T;
       }
 
-      // Network errors (timeout, DNS, etc.)
-      if (error instanceof TypeError) {
-        throw new RMNetworkError(`Network error: ${error.message}`);
-      }
+      const bodyText = await response.text();
+      if (!bodyText.trim()) {
+        return undefined as T;
+    }
 
-      // Unknown errors
+    try {
+      return JSON.parse(bodyText) as T;
+    } catch (parseError) {
       throw new RMNetworkError(
-        `Unknown error: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to parse response JSON: ${parseError instanceof Error ?
+          parseError.message : String(parseError)
+      }`
       );
     }
+  } catch (error) {
+    // Re-throw our custom errors
+    if (error instanceof RMApiError) {
+      throw error;
+    }
+
+    // Network errors (timeout, DNS, etc.)
+    if (error instanceof TypeError) {
+      throw new RMNetworkError(`Network error: ${error.message}`);
+    }
+
+    // Unknown errors
+    throw new RMNetworkError(
+      `Unknown error: ${error instanceof Error ?
+        error.message : String(error)}`
+    );
   }
+}
 
   /**
    * Get list of users

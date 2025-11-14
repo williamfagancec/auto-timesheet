@@ -7,6 +7,7 @@ import { router, protectedProcedure } from "../trpc.js";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import * as RMConnection from "../services/rm-connection.js";
+import { rmApi } from "../services/rm-api.js";
 
 /**
  * Zod Schemas
