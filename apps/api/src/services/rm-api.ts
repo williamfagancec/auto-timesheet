@@ -6,11 +6,6 @@
 const RM_BASE_URL = "https://api.rm.smartsheet.com/api/v1";
 
 /**
- * Headers type for fetch requests
- */
-type HeadersInit = Record<string, string>;
-
-/**
  * RM API Error Response
  */
 interface RMErrorResponse {
@@ -320,6 +315,61 @@ export class RMApiClient {
         method: "GET",
       }
     );
+  }
+
+  /**
+   * Fetch all projects with pagination
+   * Handles RM API pagination automatically, fetching all pages
+   * Returns only active (non-archived) projects
+   */
+  async fetchAllProjects(token: string): Promise<RMProject[]> {
+    const allProjects: RMProject[] = [];
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore) {
+      try {
+        const response = await this.getProjects(token, page);
+
+        if (!response.data || response.data.length === 0) {
+          hasMore = false;
+          break;
+        }
+
+        // Filter to only active projects
+        const activeProjects = response.data.filter(
+          (p) => !p.archived
+        );
+        allProjects.push(...activeProjects);
+
+        // Check if we got a full page (indicates more pages may exist)
+        // RM API returns max 1000 per page
+        hasMore = response.data.length === 1000;
+        page++;
+
+        // Safety limit: max 10 pages (10,000 projects)
+        if (page > 10) {
+          console.warn(
+            "[RM API] Reached maximum page limit (10), stopping pagination"
+          );
+          break;
+        }
+      } catch (error) {
+        // If rate limited, throw specific error
+        if (error instanceof RMRateLimitError) {
+          throw error;
+        }
+
+        // For other errors, log and stop pagination
+        console.error(`[RM API] Error fetching projects page ${page}:`, error);
+        throw new RMNetworkError(
+          `Failed to fetch all projects: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+
+    console.log(`[RM API] Fetched ${allProjects.length} active projects across ${page - 1} pages`);
+    return allProjects;
   }
 }
 
