@@ -2,28 +2,25 @@ import { router, protectedProcedure } from '../trpc.js'
 import { z } from 'zod'
 import { prisma } from 'database'
 import { TRPCError } from '@trpc/server'
+import { DEFAULT_USER_PROJECT_VALUES } from 'config'
 
 /**
  * Get or create user project defaults
  * Returns the default billable status and phase for a user
+ * Uses atomic upsert to prevent race conditions
  */
 async function getOrCreateUserDefaults(
   tx: Omit<typeof prisma, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>,
   userId: string,
 ) {
-  let defaults = await tx.userProjectDefaults.findUnique({
+  const defaults = await tx.userProjectDefaults.upsert({
     where: { userId },
+    update: {},
+    create: {
+      userId,
+      ...DEFAULT_USER_PROJECT_VALUES,
+    },
   })
-
-  if (!defaults) {
-    defaults = await tx.userProjectDefaults.create({
-      data: {
-        userId,
-        isBillable: true,
-        phase: null,
-      },
-    })
-  }
 
   return defaults
 }

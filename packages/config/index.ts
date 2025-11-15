@@ -84,3 +84,8 @@ export const ANALYTICS_CONFIG = {
   // Lookback period for coverage calculations
   coverageLookbackDays: 30,
 } as const
+
+export const DEFAULT_USER_PROJECT_VALUES = {
+  isBillable: true,
+  phase: null,
+} as const

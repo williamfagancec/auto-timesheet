@@ -94,10 +94,10 @@ export function Events() {
       const phaseMap: Record<string, string> = {}
       
       events.forEach((event: any) => {
-        if (event.isBillable !== undefined) {
+        if (event.isBillable !== undefined && eventBillable[event.id] === undefined) {
           billableMap[event.id] = event.isBillable
         }
-        if (event.phase) {
+        if (event.phase && eventPhase[event.id] === undefined) {
           phaseMap[event.id] = event.phase
         }
       })
@@ -105,7 +105,7 @@ export function Events() {
       setEventBillable((prev) => ({ ...prev, ...billableMap }))
       setEventPhase((prev) => ({ ...prev, ...phaseMap }))
     }
-  }, [events])
+  }, [events, eventBillable, eventPhase])
 
   // Sync mutation with token error handling
   const syncMutation = trpc.calendar.sync.useMutation({
@@ -147,17 +147,7 @@ export function Events() {
       }]
     })
 
-    // Update defaults if they were explicitly set
-    if (eventBillable[eventId] !== undefined || eventPhase[eventId] !== undefined) {
-      const updateDefaults: { isBillable?: boolean; phase?: string } = {}
-      if (eventBillable[eventId] !== undefined) {
-        updateDefaults.isBillable = eventBillable[eventId]
-      }
-      if (eventPhase[eventId] !== undefined) {
-        updateDefaults.phase = eventPhase[eventId] || undefined
-      }
-      // Note: Defaults are updated in the backend when entries are saved
-    }
+    
   }
 
   const handleBillableChange = (eventId: string, isBillable: boolean) => {

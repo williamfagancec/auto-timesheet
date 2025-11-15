@@ -41,7 +41,8 @@
       "Bash(lsof:*)",
       "Bash(kill:*)",
       "Bash(ps:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(prisma/migrations/20251115204711_baseline/migration.sql)"
     ],
     "deny": [],
     "ask": []

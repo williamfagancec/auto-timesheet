@@ -2,6 +2,7 @@ import { router, protectedProcedure } from '../trpc.js'
 import { z } from 'zod'
 import { prisma } from 'database'
 import { TRPCError } from '@trpc/server'
+import { DEFAULT_USER_PROJECT_VALUES } from 'config'
 
 const projectNameSchema = z
   .string()
@@ -55,10 +56,9 @@ export const projectRouter = router({
       const todayEnd = new Date(now)
       todayEnd.setHours(23, 59, 59, 999) // Set to end of today
 
-      // Get all projects
+      // Get all projects (no limit - we need to fetch all to sort correctly)
       const projects = await prisma.project.findMany({
         where: whereClause,
-        take: input.limit,
       })
 
       // Get all project IDs
@@ -116,6 +116,11 @@ export const projectRouter = router({
         sortedProjects.sort((a, b) => b.useCount - a.useCount)
       } else if (input.sortBy === 'hours30Days') {
         sortedProjects.sort((a, b) => b.hours30Days - a.hours30Days)
+      }
+
+      // Apply limit after sorting to get true top-N results
+      if (input.limit) {
+        sortedProjects = sortedProjects.slice(0, input.limit)
       }
 
       return sortedProjects
@@ -332,26 +337,17 @@ export const projectRouter = router({
   /**
    * Get user project defaults (billable status and phase)
    * Returns the most recently used values for new entries
+   * Uses atomic upsert to prevent race conditions
    */
   getDefaults: protectedProcedure.query(async ({ ctx }) => {
-    const defaults = await prisma.userProjectDefaults.findUnique({
+    const defaults = await prisma.userProjectDefaults.upsert({
       where: { userId: ctx.user.id },
+      update: {},
+      create: {
+        userId: ctx.user.id,
+        ...DEFAULT_USER_PROJECT_VALUES,
+      },
     })
-
-    // Return defaults or create and return initial defaults
-    if (!defaults) {
-      const newDefaults = await prisma.userProjectDefaults.create({
-        data: {
-          userId: ctx.user.id,
-          isBillable: true,
-          phase: null,
-        },
-      })
-      return {
-        isBillable: newDefaults.isBillable,
-        phase: newDefaults.phase,
-      }
-    }
 
     return {
       isBillable: defaults.isBillable,
@@ -375,8 +371,8 @@ export const projectRouter = router({
         where: { userId: ctx.user.id },
         create: {
           userId: ctx.user.id,
-          isBillable: input.isBillable ?? true,
-          phase: input.phase ?? null,
+          isBillable: input.isBillable ?? DEFAULT_USER_PROJECT_VALUES.isBillable,
+          phase: input.phase ?? DEFAULT_USER_PROJECT_VALUES.phase,
         },
         update: {
           ...(input.isBillable !== undefined && { isBillable: input.isBillable }),
