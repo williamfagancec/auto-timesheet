@@ -7,7 +7,10 @@ import { TRPCError } from '@trpc/server'
  * Get or create user project defaults
  * Returns the default billable status and phase for a user
  */
-async function getOrCreateUserDefaults(tx: any, userId: string) {
+async function getOrCreateUserDefaults(
+  tx: Omit<typeof prisma, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>,
+  userId: string,
+) {
   let defaults = await tx.userProjectDefaults.findUnique({
     where: { userId },
   })
@@ -259,6 +262,7 @@ export const timesheetRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      
       // Validate that all events belong to the user
       const events = await prisma.calendarEvent.findMany({
         where: {
@@ -356,21 +360,6 @@ export const timesheetRouter = router({
                 created.push(entry.eventId)
               }
 
-              // Update user defaults if new values were provided
-              const defaultsUpdate: { isBillable?: boolean; phase?: string | null } = {}
-              if (entry.isBillable !== undefined) {
-                defaultsUpdate.isBillable = entry.isBillable
-              }
-              if (entry.phase !== undefined) {
-                defaultsUpdate.phase = entry.phase || null
-              }
-
-              if (Object.keys(defaultsUpdate).length > 0) {
-                await tx.userProjectDefaults.update({
-                  where: { userId: ctx.user.id },
-                  data: defaultsUpdate,
-                })
-              }
 
               // Increment project use count
               await tx.project.update({
@@ -572,43 +561,38 @@ export const timesheetRouter = router({
       const manualEntries = existingEntries.filter((e) => e.isManual && e.eventId === null)
 
       const eventMinutes = eventEntries.reduce((sum, e) => sum + e.duration, 0)
-      const adjustmentMinutes = targetMinutes - eventMinutes
 
       try {
         await prisma.$transaction(async (tx) => {
           // Get user defaults
           const userDefaults = await getOrCreateUserDefaults(tx, ctx.user.id)
 
-          // Use provided values or fall back to user defaults
-          const isBillable = input.isBillable ?? userDefaults.isBillable
-          const phase = input.phase ?? userDefaults.phase
 
           // Delete all existing manual adjustment entries for this day/project
           await tx.timesheetEntry.deleteMany({
-            where: {
-              id: { in: manualEntries.map((e) => e.id) },
-            },
-          })
-
-          // Create new manual adjustment entry if needed (non-zero hours)
+            where: { id: { in: manualEntries.map((e) => e.id) } },
+          });
+          
           if (targetMinutes > 0) {
-            // If there are event entries, create adjustment entry for the delta
-            // If no event entries, create manual entry for full amount
-            if (eventEntries.length > 0 && adjustmentMinutes !== 0) {
-              await tx.timesheetEntry.create({
-                data: {
-                  userId: ctx.user.id,
-                  projectId: input.projectId,
-                  date: dateStart,
-                  duration: adjustmentMinutes,
-                  isManual: true,
-                  notes: input.notes,
-                  isBillable,
-                  phase,
-                },
-              })
-            } else if (eventEntries.length === 0) {
-              // No events, create full manual entry
+            if (eventEntries.length > 0) {
+              // Adjustment entry for difference
+              const adjustmentMinutes = targetMinutes - eventMinutes;
+              if (adjustmentMinutes !== 0) {
+                await tx.timesheetEntry.create({
+                  data: {
+                    userId: ctx.user.id,
+                    projectId: input.projectId,
+                    date: dateStart,
+                    duration: adjustmentMinutes,
+                    isManual: true,
+                    ...(input.notes && { notes: input.notes }),
+                    isBillable: input.isBillable ?? userDefaults.isBillable,
+                    phase: input.phase ?? userDefaults.phase,
+                  },
+                });
+              }
+            } else {
+              // No events → full manual entry
               await tx.timesheetEntry.create({
                 data: {
                   userId: ctx.user.id,
@@ -616,67 +600,51 @@ export const timesheetRouter = router({
                   date: dateStart,
                   duration: targetMinutes,
                   isManual: true,
-                  notes: input.notes,
-                  isBillable,
-                  phase,
+                  ...(input.notes && { notes: input.notes }),
+                  isBillable: input.isBillable ?? userDefaults.isBillable,
+                  phase: input.phase ?? userDefaults.phase,
                 },
-              })
-            } else if (input.notes || input.isBillable !== undefined || input.phase !== undefined) {
-              // Hours match events but notes/billable/phase provided - update first event entry
-              if (eventEntries[0]) {
-                const updateData: { notes?: string; isBillable?: boolean; phase?: string | null } = {}
-                if (input.notes) updateData.notes = input.notes
-                if (input.isBillable !== undefined) updateData.isBillable = input.isBillable
-                if (input.phase !== undefined) updateData.phase = input.phase || null
-                await tx.timesheetEntry.update({
-                  where: { id: eventEntries[0].id },
-                  data: updateData,
-                })
-              }
+              });
             }
-          } else if ((input.notes || input.isBillable !== undefined || input.phase !== undefined) && eventEntries.length > 0) {
-            // Zero hours but notes/billable/phase provided - update first event entry
-            const updateData: { notes?: string; isBillable?: boolean; phase?: string | null } = {}
-            if (input.notes) updateData.notes = input.notes
-            if (input.isBillable !== undefined) updateData.isBillable = input.isBillable
-            if (input.phase !== undefined) updateData.phase = input.phase || null
+          }
+          
+          // Update first event entry if notes/billable/phase are provided
+          if (eventEntries[0] && (input.notes || input.isBillable !== undefined || input.phase !== undefined)) {
+            const updateData: { notes?: string; isBillable?: boolean; phase?: string | null } = {};
+            if (input.notes) updateData.notes = input.notes;
+            if (input.isBillable !== undefined) updateData.isBillable = input.isBillable;
+            if (input.phase !== undefined) updateData.phase = input.phase || null;
+          
             await tx.timesheetEntry.update({
               where: { id: eventEntries[0].id },
               data: updateData,
-            })
+            });
           }
-
-          // Update user defaults if new values were provided
-          const defaultsUpdate: { isBillable?: boolean; phase?: string | null } = {}
-          if (input.isBillable !== undefined) {
-            defaultsUpdate.isBillable = input.isBillable
-          }
-          if (input.phase !== undefined) {
-            defaultsUpdate.phase = input.phase || null
-          }
-
+          
+          // Update user defaults
+          const defaultsUpdate: { isBillable?: boolean; phase?: string | null } = {};
+          if (input.isBillable !== undefined) defaultsUpdate.isBillable = input.isBillable;
+          if (input.phase !== undefined) defaultsUpdate.phase = input.phase || null;
           if (Object.keys(defaultsUpdate).length > 0) {
             await tx.userProjectDefaults.update({
               where: { userId: ctx.user.id },
               data: defaultsUpdate,
-            })
+            });
           }
-
-          // Increment project usage tracking
+          
+          // Increment project usage
           await tx.project.update({
             where: { id: input.projectId },
-            data: {
-              useCount: { increment: 1 },
-              lastUsedAt: new Date(),
-            },
-          })
-        })
+            data: { useCount: { increment: 1 }, lastUsedAt: new Date() },
+          });
+          
 
         return {
           success: true,
           updatedHours: input.hours,
         }
-      } catch (error) {
+      })
+    } catch (error) {
         console.error('Failed to update cell:', error)
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
@@ -753,12 +721,11 @@ export const timesheetRouter = router({
             })
 
             if (existingEntry) {
-              // Update existing entry with new project
+              // Update existing entry
               await tx.timesheetEntry.update({
                 where: { id: existingEntry.id },
                 data: {
                   projectId: input.projectId,
-                  isSkipped: false,
                   isBillable,
                   phase,
                 },
@@ -780,23 +747,7 @@ export const timesheetRouter = router({
               })
             }
           }
-
-          // Update user defaults if new values were provided
-          const defaultsUpdate: { isBillable?: boolean; phase?: string | null } = {}
-          if (input.isBillable !== undefined) {
-            defaultsUpdate.isBillable = input.isBillable
-          }
-          if (input.phase !== undefined) {
-            defaultsUpdate.phase = input.phase || null
-          }
-
-          if (Object.keys(defaultsUpdate).length > 0) {
-            await tx.userProjectDefaults.update({
-              where: { userId: ctx.user.id },
-              data: defaultsUpdate,
-            })
-          }
-
+          
           // Increment project usage
           await tx.project.update({
             where: { id: input.projectId },

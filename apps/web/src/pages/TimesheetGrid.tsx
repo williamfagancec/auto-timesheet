@@ -84,7 +84,7 @@ export function TimesheetGrid() {
       // Refetch grid data to get accurate aggregated values from server
       utils.timesheet.getWeeklyGrid.invalidate({ weekStartDate: weekStart.toISOString() })
     },
-    onError: (err) => {
+    onError: (err: unknown) => {
       console.error('Failed to update timesheet cell:', err)
       alert('Failed to update timesheet. Please try again.')
       // Clear editing state on error
@@ -131,7 +131,7 @@ export function TimesheetGrid() {
     setActiveCell({ projectId, day })
 
     // Load existing notes and billable/phase from the first entry for this project/day
-    const project = gridData?.projects.find((p) => p.id === projectId)
+    const project = gridData?.projects.find((p: typeof gridData.projects[number]) => p.id === projectId)
     const existingNotes = project?.notes[day] || ''
     setNotes(existingNotes)
 
@@ -249,7 +249,7 @@ export function TimesheetGrid() {
   const handleNotesSave = () => {
     if (!activeCell) return
 
-    const project = gridData?.projects.find((p) => p.id === activeCell.projectId)
+    const project = gridData?.projects.find((p: typeof gridData.projects[number]) => p.id === activeCell.projectId)
     if (!project) return
 
     const currentHours = project.dailyHours[activeCell.day]
@@ -360,7 +360,7 @@ export function TimesheetGrid() {
             </tr>
           </thead>
           <tbody>
-            {gridData.projects.map((project) => (
+            {gridData.projects.map((project: typeof gridData.projects[number]) => (
               <tr key={project.id} className="border-b hover:bg-gray-50">
                 <td className="p-4 border-r">
                   <div className="font-medium text-gray-900">{project.name}</div>
@@ -439,7 +439,7 @@ export function TimesheetGrid() {
                 )
               })}
               <td className="text-center p-4 text-gray-900">
-                {formatHours(Object.values(gridData.dailyTotals).reduce((sum, val) => sum + val, 0))}
+                {formatHours((Object.values(gridData.dailyTotals) as number[]).reduce((sum: number, val: number) => sum + val, 0))}
               </td>
             </tr>
           </tbody>
@@ -450,7 +450,7 @@ export function TimesheetGrid() {
       {activeCell && (
         <div ref={notesRef} className="mt-4 bg-white p-4 rounded-lg border shadow-lg">
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Details for {gridData.projects.find((p) => p.id === activeCell.projectId)?.name} - {DAY_NAMES.find((d) => d.key === activeCell.day)?.short}
+            Details for {gridData.projects.find((p: typeof gridData.projects[number]) => p.id === activeCell.projectId)?.name} - {DAY_NAMES.find((d) => d.key === activeCell.day)?.short}
           </label>
 
           {/* Billable Toggle and Phase Input */}
