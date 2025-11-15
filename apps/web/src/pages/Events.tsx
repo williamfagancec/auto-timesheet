@@ -68,8 +68,11 @@ export function Events() {
     },
   })
 
-  // Fetch user defaults for billable and phase
-  const { data: userDefaults } = trpc.project.getDefaults.useQuery()
+  // Fetch user defaults for billable and phase (only when authenticated)
+  const { data: userDefaults } = trpc.project.getDefaults.useQuery(undefined, {
+    retry: 1,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  })
 
   // Single event categorization mutation (auto-save)
   const categorizeSingleMutation = trpc.timesheet.bulkCategorize.useMutation({

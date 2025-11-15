@@ -41,6 +41,8 @@ export function TimesheetGrid() {
   // Active cell for editing and notes
   const [activeCell, setActiveCell] = useState<ActiveCell | null>(null)
   const [notes, setNotes] = useState<string>('')
+  const [isBillable, setIsBillable] = useState<boolean>(true)
+  const [phase, setPhase] = useState<string>('')
 
   // Pending input value (for validation on blur/enter)
   const [pendingValue, setPendingValue] = useState<{ [key: string]: string }>({})
@@ -49,14 +51,30 @@ export function TimesheetGrid() {
   const notesRef = useRef<HTMLDivElement>(null)
 
   // Fetch weekly grid data
-  const { data: gridData, isLoading, refetch } = trpc.timesheet.getWeeklyGrid.useQuery({
+  const { data: gridData, isLoading } = trpc.timesheet.getWeeklyGrid.useQuery({
     weekStartDate: weekStart.toISOString(),
   })
 
-  // Update cell mutation
+  // Fetch user defaults for billable and phase
+  const { data: userDefaults } = trpc.project.getDefaults.useQuery(undefined, {
+    retry: 1,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  })
+
+  // Get utils for cache manipulation
+  const utils = trpc.useUtils()
+
+  // Update cell mutation - simplified without complex optimistic updates
+  // The API handles aggregation of multiple entries per day, so we can't
+  // accurately predict the final value client-side
   const updateCellMutation = trpc.timesheet.updateCell.useMutation({
     onSuccess: () => {
-      refetch()
+      // Refetch grid data to get accurate aggregated values from server
+      utils.timesheet.getWeeklyGrid.invalidate({ weekStartDate: weekStart.toISOString() })
+    },
+    onError: (err) => {
+      console.error('Failed to update timesheet cell:', err)
+      alert('Failed to update timesheet. Please try again.')
     },
   })
 
@@ -83,23 +101,29 @@ export function TimesheetGrid() {
         if (!isCell || !activeCell) {
           setActiveCell(null)
           setNotes('')
+          setIsBillable(userDefaults?.isBillable ?? true)
+          setPhase(userDefaults?.phase ?? '')
         }
       }
     }
 
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [activeCell])
+  }, [activeCell, userDefaults])
 
   // Handle cell click
   const handleCellClick = (projectId: string, day: DayKey) => {
     // Activate cell and load notes
     setActiveCell({ projectId, day })
 
-    // Load existing notes
+    // Load existing notes and billable/phase from the first entry for this project/day
     const project = gridData?.projects.find((p) => p.id === projectId)
     const existingNotes = project?.notes[day] || ''
     setNotes(existingNotes)
+
+    // Set billable and phase to user defaults
+    setIsBillable(userDefaults?.isBillable ?? true)
+    setPhase(userDefaults?.phase ?? '')
   }
 
   // Handle input change (just update local state, don't save yet)
@@ -138,20 +162,22 @@ export function TimesheetGrid() {
     const cellDate = new Date(weekStart)
     cellDate.setDate(cellDate.getDate() + dayIndex)
 
-    // Update cell
-    updateCellMutation.mutate({
-      projectId,
-      date: cellDate.toISOString(),
-      hours: roundedHours,
-      notes: activeCell?.projectId === projectId && activeCell?.day === day ? notes : undefined,
-    })
-
-    // Clear pending value
+    // Clear pending value immediately to show submitted value while processing
     const key = `${projectId}-${day}`
     setPendingValue((prev) => {
       const newState = { ...prev }
       delete newState[key]
       return newState
+    })
+
+    // Update cell on server
+    updateCellMutation.mutate({
+      projectId,
+      date: cellDate.toISOString(),
+      hours: roundedHours,
+      notes: activeCell?.projectId === projectId && activeCell?.day === day ? notes : undefined,
+      isBillable: activeCell?.projectId === projectId && activeCell?.day === day ? isBillable : undefined,
+      phase: activeCell?.projectId === projectId && activeCell?.day === day ? (phase || undefined) : undefined,
     })
   }
 
@@ -177,12 +203,14 @@ export function TimesheetGrid() {
     const cellDate = new Date(weekStart)
     cellDate.setDate(cellDate.getDate() + dayIndex)
 
-    // Update with notes
+    // Update with notes, billable, and phase
     updateCellMutation.mutate({
       projectId: activeCell.projectId,
       date: cellDate.toISOString(),
       hours: currentHours,
       notes: notes,
+      isBillable: isBillable,
+      phase: phase || undefined,
     })
   }
 
@@ -305,6 +333,7 @@ export function TimesheetGrid() {
                         value={displayValue}
                         onChange={(e) => handleInputChange(project.id, day.key, e.target.value)}
                         onBlur={(e) => handleInputBlur(project.id, day.key, e.target.value)}
+                        onFocus={(e) => e.target.select()}
                         onKeyDown={(e) => handleKeyDown(e, project.id, day.key, e.currentTarget.value)}
                         onClick={(e) => e.stopPropagation()}
                         className={`w-full text-center bg-transparent outline-none ${
@@ -355,8 +384,30 @@ export function TimesheetGrid() {
       {activeCell && (
         <div ref={notesRef} className="mt-4 bg-white p-4 rounded-lg border shadow-lg">
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Notes for {gridData.projects.find((p) => p.id === activeCell.projectId)?.name} - {DAY_NAMES.find((d) => d.key === activeCell.day)?.short}
+            Details for {gridData.projects.find((p) => p.id === activeCell.projectId)?.name} - {DAY_NAMES.find((d) => d.key === activeCell.day)?.short}
           </label>
+
+          {/* Billable Toggle and Phase Input */}
+          <div className="flex items-center gap-4 mb-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isBillable}
+                onChange={(e) => setIsBillable(e.target.checked)}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-700">Billable</span>
+            </label>
+            <input
+              type="text"
+              placeholder="Phase (optional)"
+              value={phase}
+              onChange={(e) => setPhase(e.target.value)}
+              className="flex-1 px-3 py-1 text-sm border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+
+          {/* Notes Textarea */}
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
@@ -370,6 +421,8 @@ export function TimesheetGrid() {
               onClick={() => {
                 setActiveCell(null)
                 setNotes('')
+                setIsBillable(userDefaults?.isBillable ?? true)
+                setPhase(userDefaults?.phase ?? '')
               }}
               className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
             >
@@ -380,7 +433,7 @@ export function TimesheetGrid() {
               disabled={updateCellMutation.isPending}
               className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50"
             >
-              {updateCellMutation.isPending ? 'Saving...' : 'Save Note'}
+              {updateCellMutation.isPending ? 'Saving...' : 'Save'}
             </button>
           </div>
         </div>

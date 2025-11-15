@@ -37,7 +37,10 @@
       "Bash(NODE_ENV=test DATABASE_URL=\"postgresql://user:password@localhost:5432/timetracker_test?connection_limit=20&pool_timeout=10\" npx prisma migrate deploy:*)",
       "Bash(NODE_ENV=test DATABASE_URL=\"postgresql://user:password@localhost:5432/timetracker_test?connection_limit=20&pool_timeout=10\" pnpm --filter database db:push:*)",
       "Bash(find:*)",
-      "Bash(timeout 10 pnpm dev:api:*)"
+      "Bash(timeout 10 pnpm dev:api:*)",
+      "Bash(lsof:*)",
+      "Bash(kill:*)",
+      "Bash(ps:*)"
     ],
     "deny": [],
     "ask": []
