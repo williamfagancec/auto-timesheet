@@ -272,6 +272,65 @@ pnpm db:seed          # Seed AI test data
 - Measures 6 critical query patterns with 10 iterations each
 - Usage: `npx tsx apps/api/benchmark-queries.ts <userId>`
 
+### 💰 Billable Tracking & Phase Management - Complete (2025-11-15)
+
+**Status:** Full implementation of billable time tracking and project phase fields across API and frontend.
+
+**Database Schema Updates:**
+- Added `UserProjectDefaults` model with `userId`, `isBillable`, `phase` fields
+- `TimesheetEntry` model already includes `isBillable` (Boolean, default: true) and `phase` (String, optional) fields
+- User defaults system remembers last-used billable status and phase for convenience
+
+**API Enhancements (`apps/api/src/routers/`):**
+- **Project Router:**
+  - `getDefaults` - Query user's default billable status and phase
+  - `updateDefaults` - Update user defaults (upsert operation)
+  - `list` - Enhanced with `hours30Days` sort option (shows total hours worked per project in last 30 days)
+  - Calculates hours from timesheet entries efficiently (single aggregated query)
+- **Timesheet Router:**
+  - `bulkCategorize` - Now accepts `isBillable` and `phase` parameters per entry
+  - `updateCell` - Supports billable and phase updates on grid cells
+  - `assignEventToProject` - Accepts billable and phase when assigning events
+  - Auto-updates user defaults when explicit values provided
+  - Falls back to user defaults when values not specified
+  - Helper function `getOrCreateUserDefaults()` ensures defaults exist
+- **Calendar Router:**
+  - `getEventsWithStatus` - Returns `isBillable` and `phase` with event data for display
+
+**Frontend UI (`apps/web/`):**
+- **Events Page (`pages/Events.tsx`):**
+  - Billable checkbox for each categorized event
+  - Phase input field (optional text field)
+  - Auto-save on checkbox toggle or phase field blur
+  - State management for billable/phase per event
+  - Initializes from existing values or user defaults
+- **Projects Page (`pages/Projects.tsx`):**
+  - Updated "Use Count" column to "Hours (30 days)"
+  - Displays total hours worked (rounded to 1 decimal place)
+  - Sort dropdown updated to show "Most Hours (30 days)" option
+  - Default sort remains "Last Used"
+
+**User Experience:**
+- Sticky defaults: System remembers last-used billable status and phase
+- Auto-save: Changes persist immediately on selection (no save button needed)
+- Visual feedback: Billable checkbox and phase field appear after project categorization
+- Efficient sorting: Projects page shows actual hours worked, not just use count
+
+**Technical Implementation:**
+- Transaction-based updates ensure atomicity
+- User defaults automatically created on first use
+- Graceful fallbacks when defaults don't exist (billable=true, phase=null)
+- Type-safe parameter passing through tRPC mutations
+- React state properly tracks per-event values
+
+**Files Modified:**
+- `apps/api/src/routers/calendar.ts` - Added billable/phase to event status response
+- `apps/api/src/routers/project.ts` - Added defaults endpoints, hours30Days calculation
+- `apps/api/src/routers/timesheet.ts` - Enhanced all mutations with billable/phase support
+- `apps/web/src/pages/Events.tsx` - Added UI controls for billable and phase
+- `apps/web/src/pages/Projects.tsx` - Updated to display hours instead of use count
+- `packages/database/prisma/schema.prisma` - UserProjectDefaults model (already present)
+
 ---
 
 ### 🚧 Partially Implemented

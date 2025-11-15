@@ -8,7 +8,7 @@
  * @see docs/AI_ENGINE.md Phase 5: Learning & Feedback
  */
 
-import { PrismaClient, CategoryRule } from '@prisma/client'
+import { PrismaClient } from '@prisma/client'
 import { CategoryRuleType } from 'shared'
 import { extractPatternsFromEvent, type CalendarEventInput } from './ai-categorization'
 
@@ -160,6 +160,8 @@ export async function strengthenRules(
   userId: string,
   patterns: ExtractedPattern[],
   projectId: string,
+  // @ts-expect-error - Reserved for future use
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   event: CalendarEventInput
 ): Promise<void> {
   try {

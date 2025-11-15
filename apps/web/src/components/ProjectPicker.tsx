@@ -133,13 +133,21 @@ export function ProjectPicker({
         type="button"
         onClick={() => setOpen(!open)}
         disabled={disabled}
-        className="w-full px-4 py-2 text-left bg-white border rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="w-full px-4 py-2 text-left bg-white border rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-between"
       >
         {selectedProject ? (
           <span className="text-gray-900">{selectedProject.name}</span>
         ) : (
           <span className="text-gray-500">{placeholder}</span>
         )}
+        <svg
+          className={`w-4 h-4 ml-2 transition-transform ${open ? 'rotate-180' : ''}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
       </button>
 
       {open && (
@@ -191,7 +199,7 @@ export function ProjectPicker({
 
               {/* Recent Projects Section */}
               {recentProjects.length > 0 && (
-                <Command.Group heading="Recent">
+                <Command.Group>
                   {recentProjects.map((project) => (
                     <Command.Item
                       key={project.id}

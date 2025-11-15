@@ -68,6 +68,12 @@ export function Events() {
     },
   })
 
+  // Fetch user defaults for billable and phase (only when authenticated)
+  const { data: userDefaults } = trpc.project.getDefaults.useQuery(undefined, {
+    retry: 1,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  })
+
   // Single event categorization mutation (auto-save)
   const categorizeSingleMutation = trpc.timesheet.bulkCategorize.useMutation({
     onSuccess: () => {
@@ -76,6 +82,30 @@ export function Events() {
       queryClient.invalidateQueries({ queryKey: [['timesheet', 'getWeeklyGrid']] })
     },
   })
+
+  // State for billable and phase per event
+  const [eventBillable, setEventBillable] = useState<Record<string, boolean>>({})
+  const [eventPhase, setEventPhase] = useState<Record<string, string>>({})
+
+  // Initialize state from existing events when they load
+  useEffect(() => {
+    if (events.length > 0) {
+      const billableMap: Record<string, boolean> = {}
+      const phaseMap: Record<string, string> = {}
+      
+      events.forEach((event: any) => {
+        if (event.isBillable !== undefined) {
+          billableMap[event.id] = event.isBillable
+        }
+        if (event.phase) {
+          phaseMap[event.id] = event.phase
+        }
+      })
+      
+      setEventBillable((prev) => ({ ...prev, ...billableMap }))
+      setEventPhase((prev) => ({ ...prev, ...phaseMap }))
+    }
+  }, [events])
 
   // Sync mutation with token error handling
   const syncMutation = trpc.calendar.sync.useMutation({
@@ -103,13 +133,39 @@ export function Events() {
   })
 
   const handleProjectSelect = (eventId: string, projectId: string) => {
+    // Get billable and phase for this event (use defaults if not set)
+    const isBillable = eventBillable[eventId] ?? userDefaults?.isBillable ?? true
+    const phase = eventPhase[eventId] ?? userDefaults?.phase ?? null
+
     // Auto-save immediately when project is selected
     categorizeSingleMutation.mutate({
       entries: [{
         eventId,
         projectId,
+        isBillable,
+        phase: phase || undefined,
       }]
     })
+
+    // Update defaults if they were explicitly set
+    if (eventBillable[eventId] !== undefined || eventPhase[eventId] !== undefined) {
+      const updateDefaults: { isBillable?: boolean; phase?: string } = {}
+      if (eventBillable[eventId] !== undefined) {
+        updateDefaults.isBillable = eventBillable[eventId]
+      }
+      if (eventPhase[eventId] !== undefined) {
+        updateDefaults.phase = eventPhase[eventId] || undefined
+      }
+      // Note: Defaults are updated in the backend when entries are saved
+    }
+  }
+
+  const handleBillableChange = (eventId: string, isBillable: boolean) => {
+    setEventBillable((prev) => ({ ...prev, [eventId]: isBillable }))
+  }
+
+  const handlePhaseChange = (eventId: string, phase: string) => {
+    setEventPhase((prev) => ({ ...prev, [eventId]: phase }))
   }
 
   const handleSkip = (eventId: string) => {
@@ -447,14 +503,62 @@ export function Events() {
                           )}
                         </div>
 
-                        {/* Project Picker or Status */}
+                        {/* Project Picker and Entry Details */}
                         {!isSkipped && (
-                          <div className="flex-shrink-0 w-64">
+                          <div className="flex-shrink-0 w-80 space-y-2">
                             <ProjectPicker
                               value={event.projectId}
                               onSelect={(projectId) => handleProjectSelect(event.id, projectId)}
                               placeholder={isCategorized ? "Change project..." : "Select project..."}
                             />
+                            {isCategorized && (
+                              <div className="flex items-center gap-3 text-sm">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={eventBillable[event.id] ?? userDefaults?.isBillable ?? true}
+                                    onChange={(e) => {
+                                      handleBillableChange(event.id, e.target.checked)
+                                      // Auto-save if project is already selected
+                                      if (event.projectId) {
+                                        categorizeSingleMutation.mutate({
+                                          entries: [{
+                                            eventId: event.id,
+                                            projectId: event.projectId,
+                                            isBillable: e.target.checked,
+                                            phase: eventPhase[event.id] ?? userDefaults?.phase ?? undefined,
+                                          }]
+                                        })
+                                      }
+                                    }}
+                                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                  />
+                                  <span className="text-gray-700">Billable</span>
+                                </label>
+                                <input
+                                  type="text"
+                                  placeholder="Phase (optional)"
+                                  value={eventPhase[event.id] ?? userDefaults?.phase ?? ''}
+                                  onChange={(e) => {
+                                    handlePhaseChange(event.id, e.target.value)
+                                  }}
+                                  onBlur={() => {
+                                    // Auto-save on blur if project is already selected
+                                    if (event.projectId) {
+                                      categorizeSingleMutation.mutate({
+                                        entries: [{
+                                          eventId: event.id,
+                                          projectId: event.projectId,
+                                          isBillable: eventBillable[event.id] ?? userDefaults?.isBillable ?? true,
+                                          phase: eventPhase[event.id] || undefined,
+                                        }]
+                                      })
+                                    }
+                                  }}
+                                  className="flex-1 px-2 py-1 text-sm border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                              </div>
+                            )}
                           </div>
                         )}
 

@@ -41,22 +41,54 @@ export function TimesheetGrid() {
   // Active cell for editing and notes
   const [activeCell, setActiveCell] = useState<ActiveCell | null>(null)
   const [notes, setNotes] = useState<string>('')
+  const [isBillable, setIsBillable] = useState<boolean>(true)
+  const [phase, setPhase] = useState<string>('')
 
   // Pending input value (for validation on blur/enter)
   const [pendingValue, setPendingValue] = useState<{ [key: string]: string }>({})
+
+  // Track which cells are currently being edited to prevent display flicker during save
+  const [editingCells, setEditingCells] = useState<Set<string>>(new Set())
 
   // Ref for notes container to handle clicks outside
   const notesRef = useRef<HTMLDivElement>(null)
 
   // Fetch weekly grid data
-  const { data: gridData, isLoading, refetch } = trpc.timesheet.getWeeklyGrid.useQuery({
+  const { data: gridData, isLoading } = trpc.timesheet.getWeeklyGrid.useQuery({
     weekStartDate: weekStart.toISOString(),
   })
 
-  // Update cell mutation
+  // Clear editing state when fresh data arrives from server
+  useEffect(() => {
+    if (gridData && !isLoading) {
+      // Clear all editing states and pending values when new data is loaded
+      setEditingCells(new Set())
+      setPendingValue({})
+    }
+  }, [gridData, isLoading])
+
+  // Fetch user defaults for billable and phase
+  const { data: userDefaults } = trpc.project.getDefaults.useQuery(undefined, {
+    retry: 1,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  })
+
+  // Get utils for cache manipulation
+  const utils = trpc.useUtils()
+
+  // Update cell mutation - simplified without complex optimistic updates
+  // The API handles aggregation of multiple entries per day, so we can't
+  // accurately predict the final value client-side
   const updateCellMutation = trpc.timesheet.updateCell.useMutation({
     onSuccess: () => {
-      refetch()
+      // Refetch grid data to get accurate aggregated values from server
+      utils.timesheet.getWeeklyGrid.invalidate({ weekStartDate: weekStart.toISOString() })
+    },
+    onError: (err) => {
+      console.error('Failed to update timesheet cell:', err)
+      alert('Failed to update timesheet. Please try again.')
+      // Clear editing state on error
+      setEditingCells(new Set())
     },
   })
 
@@ -83,46 +115,88 @@ export function TimesheetGrid() {
         if (!isCell || !activeCell) {
           setActiveCell(null)
           setNotes('')
+          setIsBillable(userDefaults?.isBillable ?? true)
+          setPhase(userDefaults?.phase ?? '')
         }
       }
     }
 
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [activeCell])
+  }, [activeCell, userDefaults])
 
   // Handle cell click
   const handleCellClick = (projectId: string, day: DayKey) => {
     // Activate cell and load notes
     setActiveCell({ projectId, day })
 
-    // Load existing notes
+    // Load existing notes and billable/phase from the first entry for this project/day
     const project = gridData?.projects.find((p) => p.id === projectId)
     const existingNotes = project?.notes[day] || ''
     setNotes(existingNotes)
+
+    // Set billable and phase to user defaults
+    setIsBillable(userDefaults?.isBillable ?? true)
+    setPhase(userDefaults?.phase ?? '')
   }
 
   // Handle input change (just update local state, don't save yet)
   const handleInputChange = (projectId: string, day: DayKey, value: string) => {
     const key = `${projectId}-${day}`
     setPendingValue((prev) => ({ ...prev, [key]: value }))
+
+    // Mark this cell as being edited
+    setEditingCells((prev) => new Set(prev).add(key))
+  }
+
+  // Handle input focus - mark as editing
+  const handleInputFocus = (projectId: string, day: DayKey) => {
+    const key = `${projectId}-${day}`
+    setEditingCells((prev) => new Set(prev).add(key))
   }
 
   // Handle blur or enter key (validate and save)
   const handleInputBlur = (projectId: string, day: DayKey, value: string) => {
-    if (!value) {
-      // Clear pending value
-      const key = `${projectId}-${day}`
+    const key = `${projectId}-${day}`
+
+    if (!value || value.trim() === '') {
+      // Empty value - send 0 hours to delete manual entries
+      const dayIndex = DAY_NAMES.findIndex((d) => d.key === day)
+      const cellDate = new Date(weekStart)
+      cellDate.setDate(cellDate.getDate() + dayIndex)
+
+      // Update cell on server with 0 hours
+      updateCellMutation.mutate({
+        projectId,
+        date: cellDate.toISOString(),
+        hours: 0,
+        notes: activeCell?.projectId === projectId && activeCell?.day === day ? notes : undefined,
+        isBillable: activeCell?.projectId === projectId && activeCell?.day === day ? isBillable : undefined,
+        phase: activeCell?.projectId === projectId && activeCell?.day === day ? (phase || undefined) : undefined,
+      })
+
+      // Keep cell in editing state until server responds
+      return
+    }
+
+    // Parse hours (allow decimal values in 0.25 increments)
+    const hours = parseFloat(value)
+
+    if (isNaN(hours)) {
+      alert('Please enter a valid number')
+      // Clear editing state and pending value
       setPendingValue((prev) => {
         const newState = { ...prev }
         delete newState[key]
         return newState
       })
+      setEditingCells((prev) => {
+        const newSet = new Set(prev)
+        newSet.delete(key)
+        return newSet
+      })
       return
     }
-
-    // Parse hours (allow decimal values in 0.25 increments)
-    const hours = parseFloat(value) || 0
 
     // Round to nearest 0.25 (15 minutes)
     const roundedHours = Math.round(hours * 4) / 4
@@ -130,6 +204,17 @@ export function TimesheetGrid() {
     // Validate range (0-24 hours)
     if (roundedHours < 0 || roundedHours > 24) {
       alert('Hours must be between 0 and 24')
+      // Clear editing state and pending value
+      setPendingValue((prev) => {
+        const newState = { ...prev }
+        delete newState[key]
+        return newState
+      })
+      setEditingCells((prev) => {
+        const newSet = new Set(prev)
+        newSet.delete(key)
+        return newSet
+      })
       return
     }
 
@@ -138,20 +223,17 @@ export function TimesheetGrid() {
     const cellDate = new Date(weekStart)
     cellDate.setDate(cellDate.getDate() + dayIndex)
 
-    // Update cell
+    // Update pending value to show rounded value immediately
+    setPendingValue((prev) => ({ ...prev, [key]: formatHours(roundedHours) }))
+
+    // Update cell on server (editing state will be cleared when data refetches)
     updateCellMutation.mutate({
       projectId,
       date: cellDate.toISOString(),
       hours: roundedHours,
       notes: activeCell?.projectId === projectId && activeCell?.day === day ? notes : undefined,
-    })
-
-    // Clear pending value
-    const key = `${projectId}-${day}`
-    setPendingValue((prev) => {
-      const newState = { ...prev }
-      delete newState[key]
-      return newState
+      isBillable: activeCell?.projectId === projectId && activeCell?.day === day ? isBillable : undefined,
+      phase: activeCell?.projectId === projectId && activeCell?.day === day ? (phase || undefined) : undefined,
     })
   }
 
@@ -177,12 +259,14 @@ export function TimesheetGrid() {
     const cellDate = new Date(weekStart)
     cellDate.setDate(cellDate.getDate() + dayIndex)
 
-    // Update with notes
+    // Update with notes, billable, and phase
     updateCellMutation.mutate({
       projectId: activeCell.projectId,
       date: cellDate.toISOString(),
       hours: currentHours,
       notes: notes,
+      isBillable: isBillable,
+      phase: phase || undefined,
     })
   }
 
@@ -285,7 +369,14 @@ export function TimesheetGrid() {
                   const hours = project.dailyHours[day.key]
                   const isActive = activeCell?.projectId === project.id && activeCell?.day === day.key
                   const key = `${project.id}-${day.key}`
-                  const displayValue = pendingValue[key] !== undefined ? pendingValue[key] : formatHours(hours)
+                  const isEditing = editingCells.has(key)
+
+                  // Display logic:
+                  // 1. If cell is being edited AND has pending value, show pending value
+                  // 2. Otherwise, show formatted hours from server
+                  const displayValue = (isEditing && pendingValue[key] !== undefined)
+                    ? pendingValue[key]
+                    : formatHours(hours)
 
                   return (
                     <td
@@ -305,6 +396,10 @@ export function TimesheetGrid() {
                         value={displayValue}
                         onChange={(e) => handleInputChange(project.id, day.key, e.target.value)}
                         onBlur={(e) => handleInputBlur(project.id, day.key, e.target.value)}
+                        onFocus={(e) => {
+                          e.target.select()
+                          handleInputFocus(project.id, day.key)
+                        }}
                         onKeyDown={(e) => handleKeyDown(e, project.id, day.key, e.currentTarget.value)}
                         onClick={(e) => e.stopPropagation()}
                         className={`w-full text-center bg-transparent outline-none ${
@@ -355,8 +450,30 @@ export function TimesheetGrid() {
       {activeCell && (
         <div ref={notesRef} className="mt-4 bg-white p-4 rounded-lg border shadow-lg">
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Notes for {gridData.projects.find((p) => p.id === activeCell.projectId)?.name} - {DAY_NAMES.find((d) => d.key === activeCell.day)?.short}
+            Details for {gridData.projects.find((p) => p.id === activeCell.projectId)?.name} - {DAY_NAMES.find((d) => d.key === activeCell.day)?.short}
           </label>
+
+          {/* Billable Toggle and Phase Input */}
+          <div className="flex items-center gap-4 mb-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isBillable}
+                onChange={(e) => setIsBillable(e.target.checked)}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-700">Billable</span>
+            </label>
+            <input
+              type="text"
+              placeholder="Phase (optional)"
+              value={phase}
+              onChange={(e) => setPhase(e.target.value)}
+              className="flex-1 px-3 py-1 text-sm border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+
+          {/* Notes Textarea */}
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
@@ -370,6 +487,8 @@ export function TimesheetGrid() {
               onClick={() => {
                 setActiveCell(null)
                 setNotes('')
+                setIsBillable(userDefaults?.isBillable ?? true)
+                setPhase(userDefaults?.phase ?? '')
               }}
               className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
             >
@@ -380,7 +499,7 @@ export function TimesheetGrid() {
               disabled={updateCellMutation.isPending}
               className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50"
             >
-              {updateCellMutation.isPending ? 'Saving...' : 'Save Note'}
+              {updateCellMutation.isPending ? 'Saving...' : 'Save'}
             </button>
           </div>
         </div>

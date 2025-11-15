@@ -129,9 +129,9 @@ export class RMApiClient {
 
       // Handle validation errors (400, 422)
       if (response.status === 400 || response.status === 422) {
-        const errorData: RMErrorResponse = await response
+        const errorData: RMErrorResponse = (await response
           .json()
-          .catch(() => ({}));
+          .catch(() => ({}))) as RMErrorResponse;
         const errorMessage =
           errorData.error ||
           errorData.message ||
