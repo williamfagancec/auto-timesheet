@@ -1,6 +1,7 @@
 import { prisma } from 'database'
 import createDefaultSuggestionEngine from './suggestion-factory'
 import { getValidAccessToken } from '../auth/token-refresh.js'
+import { zonedTimeToUtc } from 'date-fns-tz'
 
 /**
  * Google Calendar API event interfaces
@@ -379,16 +380,30 @@ export function getUserLocalNow(timezone: string): Date {
 export function getEndOfTodayInTimezone(timezone: string): Date {
   const now = new Date()
   try {
-    
-    const localNow = new Date(now.toLocaleString('en-US', { timeZone: timezone }))
-    const tzOffsetMs = now.getTime() - localNow.getTime()
-    localNow.setHours(23, 59, 59, 999)
-    const timeMax = new Date(localNow.getTime() + tzOffsetMs)
+    // Get the user's local date (year, month, day) in the target timezone
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+
+    const parts = formatter.formatToParts(now)
+    const year = parts.find((p) => p.type === 'year')?.value ?? '1970'
+    const month = parts.find((p) => p.type === 'month')?.value ?? '01'
+    const day = parts.find((p) => p.type === 'day')?.value ?? '01'
+
+    // Build a local end-of-day string for the target timezone (no offset): YYYY-MM-DDT23:59:59.999
+    const localEndOfDay = `${year}-${month}-${day}T23:59:59.999`
+
+    // Convert that local end-of-day in the given timezone to an exact UTC Date using date-fns-tz.
+    // zonedTimeToUtc handles DST and zone offsets at that specific local instant.
+    const timeMax = zonedTimeToUtc(localEndOfDay, timezone)
 
     console.log(`[Timezone Calc] End of day for ${timezone}:`, {
       now: now.toISOString(),
       timeMax: timeMax.toISOString(),
-      userLocalDate: now.toLocaleString('en-US', { timeZone: timezone }),
+      userLocalDate: `${year}-${month}-${day}`,
     })
 
     return timeMax

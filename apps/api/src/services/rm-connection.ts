@@ -53,9 +53,10 @@ export async function createConnection(
         tokenAuthTag: authTag,
         rmUserId: rmUser.id,
         rmUserEmail: rmUser.email,
-        rmUserName: rmUser.name || rmUser.first_name && rmUser.last_name
+        rmUserName: rmUser.name ||
+        (rmUser.first_name && rmUser.last_name
           ? `${rmUser.first_name} ${rmUser.last_name}`.trim()
-          : null,
+          : null),
         updatedAt: new Date(),
       },
       select: {
@@ -80,9 +81,10 @@ export async function createConnection(
       tokenAuthTag: authTag,
       rmUserId: rmUser.id,
       rmUserEmail: rmUser.email,
-      rmUserName: rmUser.name || rmUser.first_name && rmUser.last_name
-        ? `${rmUser.first_name} ${rmUser.last_name}`.trim()
-        : null,
+      rmUserName: rmUser.name ||
+        (rmUser.first_name && rmUser.last_name
+          ? `${rmUser.first_name} ${rmUser.last_name}`.trim()
+          : null),
       autoSyncEnabled: false,
     },
     select: {

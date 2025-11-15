@@ -129,7 +129,7 @@ export function Settings() {
 
             <div className="flex gap-3">
               <button
-                onClick={() => window.location.href = '/rm/projects'}
+                onClick={() => window.location.href = '/settings/rm/project-mapping'}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
               >
                 Manage Project Mappings

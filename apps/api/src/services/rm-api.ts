@@ -94,10 +94,10 @@ export class RMApiClient {
   ): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
 
-    const headers: HeadersInit = {
+    const headers: Record<string, string> = {
       "Content-Type": "application/json",
       auth: token,
-      ...options.headers,
+      ...(options.headers as Record<string, string>),
     };
 
     try {
@@ -116,7 +116,7 @@ export class RMApiClient {
 
       // Handle authentication errors (401, 403)
       if (response.status === 401 || response.status === 403) {
-        const errorData = await response.json().catch(() => ({}));
+        const errorData = (await response.json().catch(() => ({}))) as RMErrorResponse;
         throw new RMAuthError(
           errorData.error || errorData.message || "Invalid API token"
         );
@@ -149,30 +149,55 @@ export class RMApiClient {
 
       // Handle other error responses
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+        const errorData = (await response.json().catch(() => ({}))) as RMErrorResponse;
         throw new RMNetworkError(
-          errorData.error || errorData.message || `HTTP ${response.status}`
+          errorData.error || errorData.message || `HTTP error ${response.status}`
         );
       }
 
-      return await response.json();
-    } catch (error) {
-      // Re-throw our custom errors
-      if (error instanceof RMApiError) {
-        throw error;
+      const method = options.method?.toUpperCase();
+
+      if (
+        method === "HEAD" ||
+        response.status === 204 ||
+        response.status === 205 ||
+        response.status === 304
+      ) {
+        return undefined as T;
       }
 
-      // Network errors (timeout, DNS, etc.)
-      if (error instanceof TypeError) {
-        throw new RMNetworkError(`Network error: ${error.message}`);
-      }
+      const bodyText = await response.text();
+      if (!bodyText.trim()) {
+        return undefined as T;
+    }
 
-      // Unknown errors
+    try {
+      return JSON.parse(bodyText) as T;
+    } catch (parseError) {
       throw new RMNetworkError(
-        `Unknown error: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to parse response JSON: ${parseError instanceof Error ?
+          parseError.message : String(parseError)
+      }`
       );
     }
+  } catch (error) {
+    // Re-throw our custom errors
+    if (error instanceof RMApiError) {
+      throw error;
+    }
+
+    // Network errors (timeout, DNS, etc.)
+    if (error instanceof TypeError) {
+      throw new RMNetworkError(`Network error: ${error.message}`);
+    }
+
+    // Unknown errors
+    throw new RMNetworkError(
+      `Unknown error: ${error instanceof Error ?
+        error.message : String(error)}`
+    );
   }
+}
 
   /**
    * Get list of users
@@ -290,6 +315,61 @@ export class RMApiClient {
         method: "GET",
       }
     );
+  }
+
+  /**
+   * Fetch all projects with pagination
+   * Handles RM API pagination automatically, fetching all pages
+   * Returns only active (non-archived) projects
+   */
+  async fetchAllProjects(token: string): Promise<RMProject[]> {
+    const allProjects: RMProject[] = [];
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore) {
+      try {
+        const response = await this.getProjects(token, page);
+
+        if (!response.data || response.data.length === 0) {
+          hasMore = false;
+          break;
+        }
+
+        // Filter to only active projects
+        const activeProjects = response.data.filter(
+          (p) => !p.archived
+        );
+        allProjects.push(...activeProjects);
+
+        // Check if we got a full page (indicates more pages may exist)
+        // RM API returns max 1000 per page
+        hasMore = response.data.length === 1000;
+        page++;
+
+        // Safety limit: max 10 pages (10,000 projects)
+        if (page > 10) {
+          console.warn(
+            "[RM API] Reached maximum page limit (10), stopping pagination"
+          );
+          break;
+        }
+      } catch (error) {
+        // If rate limited, throw specific error
+        if (error instanceof RMRateLimitError) {
+          throw error;
+        }
+
+        // For other errors, log and stop pagination
+        console.error(`[RM API] Error fetching projects page ${page}:`, error);
+        throw new RMNetworkError(
+          `Failed to fetch all projects: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+
+    console.log(`[RM API] Fetched ${allProjects.length} active projects across ${page - 1} pages`);
+    return allProjects;
   }
 }
 

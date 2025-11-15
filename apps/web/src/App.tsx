@@ -10,6 +10,7 @@ import { Events } from './pages/Events'
 import { Timesheet } from './pages/Timesheet'
 import { Projects } from './pages/Projects'
 import { Settings } from './pages/Settings'
+import { RMProjectMapping } from './pages/RMProjectMapping'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { Layout } from './components/Layout'
 
@@ -109,6 +110,17 @@ function App() {
                 <ProtectedRoute>
                   <Layout>
                     <Settings />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/settings/rm/project-mapping"
+              element={
+                <ProtectedRoute>
+                  <Layout>
+                    <RMProjectMapping />
                   </Layout>
                 </ProtectedRoute>
               }
