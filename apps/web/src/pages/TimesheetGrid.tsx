@@ -47,6 +47,9 @@ export function TimesheetGrid() {
   // Pending input value (for validation on blur/enter)
   const [pendingValue, setPendingValue] = useState<{ [key: string]: string }>({})
 
+  // Track which cells are currently being edited to prevent display flicker during save
+  const [editingCells, setEditingCells] = useState<Set<string>>(new Set())
+
   // Ref for notes container to handle clicks outside
   const notesRef = useRef<HTMLDivElement>(null)
 
@@ -54,6 +57,15 @@ export function TimesheetGrid() {
   const { data: gridData, isLoading } = trpc.timesheet.getWeeklyGrid.useQuery({
     weekStartDate: weekStart.toISOString(),
   })
+
+  // Clear editing state when fresh data arrives from server
+  useEffect(() => {
+    if (gridData && !isLoading) {
+      // Clear all editing states and pending values when new data is loaded
+      setEditingCells(new Set())
+      setPendingValue({})
+    }
+  }, [gridData, isLoading])
 
   // Fetch user defaults for billable and phase
   const { data: userDefaults } = trpc.project.getDefaults.useQuery(undefined, {
@@ -75,6 +87,8 @@ export function TimesheetGrid() {
     onError: (err) => {
       console.error('Failed to update timesheet cell:', err)
       alert('Failed to update timesheet. Please try again.')
+      // Clear editing state on error
+      setEditingCells(new Set())
     },
   })
 
@@ -130,23 +144,59 @@ export function TimesheetGrid() {
   const handleInputChange = (projectId: string, day: DayKey, value: string) => {
     const key = `${projectId}-${day}`
     setPendingValue((prev) => ({ ...prev, [key]: value }))
+
+    // Mark this cell as being edited
+    setEditingCells((prev) => new Set(prev).add(key))
+  }
+
+  // Handle input focus - mark as editing
+  const handleInputFocus = (projectId: string, day: DayKey) => {
+    const key = `${projectId}-${day}`
+    setEditingCells((prev) => new Set(prev).add(key))
   }
 
   // Handle blur or enter key (validate and save)
   const handleInputBlur = (projectId: string, day: DayKey, value: string) => {
-    if (!value) {
-      // Clear pending value
-      const key = `${projectId}-${day}`
+    const key = `${projectId}-${day}`
+
+    if (!value || value.trim() === '') {
+      // Empty value - send 0 hours to delete manual entries
+      const dayIndex = DAY_NAMES.findIndex((d) => d.key === day)
+      const cellDate = new Date(weekStart)
+      cellDate.setDate(cellDate.getDate() + dayIndex)
+
+      // Update cell on server with 0 hours
+      updateCellMutation.mutate({
+        projectId,
+        date: cellDate.toISOString(),
+        hours: 0,
+        notes: activeCell?.projectId === projectId && activeCell?.day === day ? notes : undefined,
+        isBillable: activeCell?.projectId === projectId && activeCell?.day === day ? isBillable : undefined,
+        phase: activeCell?.projectId === projectId && activeCell?.day === day ? (phase || undefined) : undefined,
+      })
+
+      // Keep cell in editing state until server responds
+      return
+    }
+
+    // Parse hours (allow decimal values in 0.25 increments)
+    const hours = parseFloat(value)
+
+    if (isNaN(hours)) {
+      alert('Please enter a valid number')
+      // Clear editing state and pending value
       setPendingValue((prev) => {
         const newState = { ...prev }
         delete newState[key]
         return newState
       })
+      setEditingCells((prev) => {
+        const newSet = new Set(prev)
+        newSet.delete(key)
+        return newSet
+      })
       return
     }
-
-    // Parse hours (allow decimal values in 0.25 increments)
-    const hours = parseFloat(value) || 0
 
     // Round to nearest 0.25 (15 minutes)
     const roundedHours = Math.round(hours * 4) / 4
@@ -154,6 +204,17 @@ export function TimesheetGrid() {
     // Validate range (0-24 hours)
     if (roundedHours < 0 || roundedHours > 24) {
       alert('Hours must be between 0 and 24')
+      // Clear editing state and pending value
+      setPendingValue((prev) => {
+        const newState = { ...prev }
+        delete newState[key]
+        return newState
+      })
+      setEditingCells((prev) => {
+        const newSet = new Set(prev)
+        newSet.delete(key)
+        return newSet
+      })
       return
     }
 
@@ -162,15 +223,10 @@ export function TimesheetGrid() {
     const cellDate = new Date(weekStart)
     cellDate.setDate(cellDate.getDate() + dayIndex)
 
-    // Clear pending value immediately to show submitted value while processing
-    const key = `${projectId}-${day}`
-    setPendingValue((prev) => {
-      const newState = { ...prev }
-      delete newState[key]
-      return newState
-    })
+    // Update pending value to show rounded value immediately
+    setPendingValue((prev) => ({ ...prev, [key]: formatHours(roundedHours) }))
 
-    // Update cell on server
+    // Update cell on server (editing state will be cleared when data refetches)
     updateCellMutation.mutate({
       projectId,
       date: cellDate.toISOString(),
@@ -313,7 +369,14 @@ export function TimesheetGrid() {
                   const hours = project.dailyHours[day.key]
                   const isActive = activeCell?.projectId === project.id && activeCell?.day === day.key
                   const key = `${project.id}-${day.key}`
-                  const displayValue = pendingValue[key] !== undefined ? pendingValue[key] : formatHours(hours)
+                  const isEditing = editingCells.has(key)
+
+                  // Display logic:
+                  // 1. If cell is being edited AND has pending value, show pending value
+                  // 2. Otherwise, show formatted hours from server
+                  const displayValue = (isEditing && pendingValue[key] !== undefined)
+                    ? pendingValue[key]
+                    : formatHours(hours)
 
                   return (
                     <td
@@ -333,7 +396,10 @@ export function TimesheetGrid() {
                         value={displayValue}
                         onChange={(e) => handleInputChange(project.id, day.key, e.target.value)}
                         onBlur={(e) => handleInputBlur(project.id, day.key, e.target.value)}
-                        onFocus={(e) => e.target.select()}
+                        onFocus={(e) => {
+                          e.target.select()
+                          handleInputFocus(project.id, day.key)
+                        }}
                         onKeyDown={(e) => handleKeyDown(e, project.id, day.key, e.currentTarget.value)}
                         onClick={(e) => e.stopPropagation()}
                         className={`w-full text-center bg-transparent outline-none ${
