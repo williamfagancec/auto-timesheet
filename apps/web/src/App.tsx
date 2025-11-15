@@ -13,6 +13,7 @@ import { Settings } from './pages/Settings'
 import { RMProjectMapping } from './pages/RMProjectMapping'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { Layout } from './components/Layout'
+import { useInactivityTimeout } from './hooks/useInactivityTimeout'
 
 // Global error handler for session invalidation
 let sessionInvalidatedCallback: (() => void) | null = null
@@ -134,9 +135,14 @@ function App() {
   )
 }
 
-// Component to handle session invalidation redirects
+// Component to handle session invalidation redirects and inactivity timeout
 function SessionInvalidationHandler() {
   const navigate = useNavigate()
+  const { data: authStatus } = trpc.auth.status.useQuery()
+  const isAuthenticated = authStatus?.authenticated ?? false
+
+  // Set up inactivity timeout for authenticated users
+  useInactivityTimeout(isAuthenticated)
 
   useEffect(() => {
     // Set up the global callback

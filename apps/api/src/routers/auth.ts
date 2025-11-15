@@ -132,6 +132,31 @@ export const authRouter = router({
       const sessionCookie = lucia.createSessionCookie(session.id)
       ctx.res.setCookie(sessionCookie.name, sessionCookie.value, sessionCookie.attributes)
 
+      // Trigger automatic calendar sync if user has a calendar connection
+      // This ensures calendar events are synced with fresh tokens after login
+      // Run this in background - don't block login flow if sync fails
+      const calendarConnection = await prisma.calendarConnection.findUnique({
+        where: {
+          userId_provider: {
+            userId: user.id,
+            provider: 'google',
+          },
+        },
+      })
+
+      if (calendarConnection) {
+        console.log(`Triggering automatic calendar sync for user ${user.email} after login`)
+        syncUserEvents(user.id)
+          .then((result) => {
+            console.log(`Auto-sync completed for ${user.email}: ${result.eventsCreated} created, ${result.eventsUpdated} updated`)
+          })
+          .catch((error) => {
+            console.error(`Auto-sync failed for ${user.email}:`, error)
+            // Don't fail the login flow - sync can be retried manually
+            // Error may occur if no calendars are selected, which is handled gracefully
+          })
+      }
+
       return {
         success: true,
         user: {
@@ -364,30 +389,19 @@ export const authRouter = router({
 
         console.log(`Successfully authenticated user ${user.email} via Google OAuth`)
 
-        // Trigger automatic calendar sync if user has selected calendars
+        // Trigger automatic calendar sync immediately after successful authentication
+        // This ensures fresh tokens are used and all calendar events are synced
         // Run this in background - don't block OAuth flow if sync fails
-        const calendarConnection = await prisma.calendarConnection.findUnique({
-          where: {
-            userId_provider: {
-              userId: user.id,
-              provider: 'google',
-            },
-          },
-        })
-
-        if (calendarConnection?.selectedCalendarIds && (calendarConnection.selectedCalendarIds as string[]).length > 0) {
-          console.log(`Triggering automatic calendar sync for user ${user.email}`)
-          syncUserEvents(user.id)
-            .then((result) => {
-              console.log(`Auto-sync completed for ${user.email}: ${result.eventsCreated} created, ${result.eventsUpdated} updated`)
-            })
-            .catch((error) => {
-              console.error(`Auto-sync failed for ${user.email}:`, error)
-              // Don't fail the OAuth flow - sync can be retried manually
-            })
-        } else {
-          console.log(`Skipping auto-sync for ${user.email} - no calendars selected yet`)
-        }
+        console.log(`Triggering automatic calendar sync for user ${user.email}`)
+        syncUserEvents(user.id)
+          .then((result) => {
+            console.log(`Auto-sync completed for ${user.email}: ${result.eventsCreated} created, ${result.eventsUpdated} updated`)
+          })
+          .catch((error) => {
+            console.error(`Auto-sync failed for ${user.email}:`, error)
+            // Don't fail the OAuth flow - sync can be retried manually
+            // Error may occur if no calendars are selected, which is handled gracefully
+          })
 
         return {
           success: true,
