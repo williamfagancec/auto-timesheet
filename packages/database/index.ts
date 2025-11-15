@@ -16,7 +16,8 @@ export const prisma = global.prisma || new PrismaClient({
 
 // Log slow queries in development (>100ms)
 if (process.env.NODE_ENV === 'development') {
-  prisma.$on('query' as any, (e: any) => {
+  // @ts-expect-error - query event not in default types
+  prisma.$on('query', (e: { duration: number; query: string }) => {
     if (e.duration > 100) {
       console.log(`[Slow Query] ${e.duration}ms: ${e.query.substring(0, 100)}...`)
     }

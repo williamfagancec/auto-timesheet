@@ -25,6 +25,7 @@ model User {
   events          CalendarEvent[]
   suggestionLogs  SuggestionLog[]
   rmConnection    RMConnection?
+  projectDefaults UserProjectDefaults?
 }
 
 model Session {
@@ -118,6 +119,8 @@ model TimesheetEntry {
   isManual  Boolean  @default(false)
   isSkipped Boolean  @default(false)
   notes     String?
+  isBillable Boolean @default(true)
+  phase     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -298,4 +301,17 @@ enum RMSyncDirection {
   PUSH           // time-tracker → RM (MVP)
   PULL           // RM → time-tracker (future)
   BIDIRECTIONAL  // future
+}
+
+model UserProjectDefaults {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  isBillable Boolean  @default(true)
+  phase      String?
+  updatedAt  DateTime @updatedAt
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

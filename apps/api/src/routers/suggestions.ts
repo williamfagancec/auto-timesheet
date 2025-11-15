@@ -39,7 +39,10 @@ const feedbackInputSchema = z.object({
 
 /**
  * Suggestion output format
+ * Note: Currently unused, but kept for future validation
  */
+// @ts-expect-error - Kept for future use
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const suggestionSchema = z.object({
   projectId: z.string(),
   projectName: z.string(),

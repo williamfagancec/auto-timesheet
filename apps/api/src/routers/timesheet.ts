@@ -3,6 +3,28 @@ import { z } from 'zod'
 import { prisma } from 'database'
 import { TRPCError } from '@trpc/server'
 
+/**
+ * Get or create user project defaults
+ * Returns the default billable status and phase for a user
+ */
+async function getOrCreateUserDefaults(tx: any, userId: string) {
+  let defaults = await tx.userProjectDefaults.findUnique({
+    where: { userId },
+  })
+
+  if (!defaults) {
+    defaults = await tx.userProjectDefaults.create({
+      data: {
+        userId,
+        isBillable: true,
+        phase: null,
+      },
+    })
+  }
+
+  return defaults
+}
+
 export const timesheetRouter = router({
   /**
    * Get weekly grid data with aggregated hours per project per day
@@ -228,6 +250,8 @@ export const timesheetRouter = router({
               eventId: z.string(),
               projectId: z.string(),
               notes: z.string().optional(),
+              isBillable: z.boolean().optional(),
+              phase: z.string().optional(),
             })
           )
           .min(1, 'At least one entry is required')
@@ -276,6 +300,9 @@ export const timesheetRouter = router({
           const updated = []
           const errors = []
 
+          // Get user defaults once at the start
+          const userDefaults = await getOrCreateUserDefaults(tx, ctx.user.id)
+
           for (const entry of input.entries) {
             try {
               const event = eventMap.get(entry.eventId)
@@ -287,6 +314,10 @@ export const timesheetRouter = router({
               // Calculate duration in minutes
               const durationMs = event.endTime.getTime() - event.startTime.getTime()
               const durationMinutes = Math.round(durationMs / 60000)
+
+              // Use provided values or fall back to user defaults
+              const isBillable = entry.isBillable ?? userDefaults.isBillable
+              const phase = entry.phase ?? userDefaults.phase
 
               // Check if timesheet entry already exists
               const existingEntry = await tx.timesheetEntry.findUnique({
@@ -301,6 +332,8 @@ export const timesheetRouter = router({
                     projectId: entry.projectId,
                     notes: entry.notes,
                     isSkipped: false, // Un-skip if it was previously skipped
+                    isBillable,
+                    phase,
                   },
                 })
                 updated.push(entry.eventId)
@@ -316,9 +349,27 @@ export const timesheetRouter = router({
                     isManual: false,
                     isSkipped: false,
                     notes: entry.notes,
+                    isBillable,
+                    phase,
                   },
                 })
                 created.push(entry.eventId)
+              }
+
+              // Update user defaults if new values were provided
+              const defaultsUpdate: { isBillable?: boolean; phase?: string | null } = {}
+              if (entry.isBillable !== undefined) {
+                defaultsUpdate.isBillable = entry.isBillable
+              }
+              if (entry.phase !== undefined) {
+                defaultsUpdate.phase = entry.phase || null
+              }
+
+              if (Object.keys(defaultsUpdate).length > 0) {
+                await tx.userProjectDefaults.update({
+                  where: { userId: ctx.user.id },
+                  data: defaultsUpdate,
+                })
               }
 
               // Increment project use count
@@ -470,6 +521,8 @@ export const timesheetRouter = router({
         date: z.string().datetime(), // Day at midnight UTC
         hours: z.number().min(0).max(24),
         notes: z.string().max(500).optional(),
+        isBillable: z.boolean().optional(),
+        phase: z.string().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -523,6 +576,13 @@ export const timesheetRouter = router({
 
       try {
         await prisma.$transaction(async (tx) => {
+          // Get user defaults
+          const userDefaults = await getOrCreateUserDefaults(tx, ctx.user.id)
+
+          // Use provided values or fall back to user defaults
+          const isBillable = input.isBillable ?? userDefaults.isBillable
+          const phase = input.phase ?? userDefaults.phase
+
           // Delete all existing manual adjustment entries for this day/project
           await tx.timesheetEntry.deleteMany({
             where: {
@@ -543,6 +603,8 @@ export const timesheetRouter = router({
                   duration: adjustmentMinutes,
                   isManual: true,
                   notes: input.notes,
+                  isBillable,
+                  phase,
                 },
               })
             } else if (eventEntries.length === 0) {
@@ -555,22 +617,48 @@ export const timesheetRouter = router({
                   duration: targetMinutes,
                   isManual: true,
                   notes: input.notes,
+                  isBillable,
+                  phase,
                 },
               })
-            } else if (input.notes) {
-              // Hours match events but notes provided - update first event entry with notes
+            } else if (input.notes || input.isBillable !== undefined || input.phase !== undefined) {
+              // Hours match events but notes/billable/phase provided - update first event entry
               if (eventEntries[0]) {
+                const updateData: { notes?: string; isBillable?: boolean; phase?: string | null } = {}
+                if (input.notes) updateData.notes = input.notes
+                if (input.isBillable !== undefined) updateData.isBillable = input.isBillable
+                if (input.phase !== undefined) updateData.phase = input.phase || null
                 await tx.timesheetEntry.update({
                   where: { id: eventEntries[0].id },
-                  data: { notes: input.notes },
+                  data: updateData,
                 })
               }
             }
-          } else if (input.notes && eventEntries.length > 0) {
-            // Zero hours but notes provided - update first event entry
+          } else if ((input.notes || input.isBillable !== undefined || input.phase !== undefined) && eventEntries.length > 0) {
+            // Zero hours but notes/billable/phase provided - update first event entry
+            const updateData: { notes?: string; isBillable?: boolean; phase?: string | null } = {}
+            if (input.notes) updateData.notes = input.notes
+            if (input.isBillable !== undefined) updateData.isBillable = input.isBillable
+            if (input.phase !== undefined) updateData.phase = input.phase || null
             await tx.timesheetEntry.update({
               where: { id: eventEntries[0].id },
-              data: { notes: input.notes },
+              data: updateData,
+            })
+          }
+
+          // Update user defaults if new values were provided
+          const defaultsUpdate: { isBillable?: boolean; phase?: string | null } = {}
+          if (input.isBillable !== undefined) {
+            defaultsUpdate.isBillable = input.isBillable
+          }
+          if (input.phase !== undefined) {
+            defaultsUpdate.phase = input.phase || null
+          }
+
+          if (Object.keys(defaultsUpdate).length > 0) {
+            await tx.userProjectDefaults.update({
+              where: { userId: ctx.user.id },
+              data: defaultsUpdate,
             })
           }
 
@@ -606,6 +694,8 @@ export const timesheetRouter = router({
       z.object({
         eventIds: z.array(z.string()).min(1).max(100),
         projectId: z.string(),
+        isBillable: z.boolean().optional(),
+        phase: z.string().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -645,6 +735,13 @@ export const timesheetRouter = router({
 
       try {
         await prisma.$transaction(async (tx) => {
+          // Get user defaults
+          const userDefaults = await getOrCreateUserDefaults(tx, ctx.user.id)
+
+          // Use provided values or fall back to user defaults
+          const isBillable = input.isBillable ?? userDefaults.isBillable
+          const phase = input.phase ?? userDefaults.phase
+
           for (const event of events) {
             const durationMinutes = Math.round(
               (event.endTime.getTime() - event.startTime.getTime()) / 60000
@@ -662,6 +759,8 @@ export const timesheetRouter = router({
                 data: {
                   projectId: input.projectId,
                   isSkipped: false,
+                  isBillable,
+                  phase,
                 },
               })
             } else {
@@ -675,9 +774,27 @@ export const timesheetRouter = router({
                   duration: durationMinutes,
                   isManual: false,
                   isSkipped: false,
+                  isBillable,
+                  phase,
                 },
               })
             }
+          }
+
+          // Update user defaults if new values were provided
+          const defaultsUpdate: { isBillable?: boolean; phase?: string | null } = {}
+          if (input.isBillable !== undefined) {
+            defaultsUpdate.isBillable = input.isBillable
+          }
+          if (input.phase !== undefined) {
+            defaultsUpdate.phase = input.phase || null
+          }
+
+          if (Object.keys(defaultsUpdate).length > 0) {
+            await tx.userProjectDefaults.update({
+              where: { userId: ctx.user.id },
+              data: defaultsUpdate,
+            })
           }
 
           // Increment project usage

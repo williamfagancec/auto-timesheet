@@ -210,7 +210,7 @@ async function adjustForAmbiguousPatterns(
 
       const uniqueRuleTypes = new Set(rules.map(r => r.rule.ruleType))
 
-      if (hasStrongSignal || uniqueRuleTypes.size >= AI_CONFIG.minUniqueRuleTypesForAmbiguity) {
+      if (hasStrongSignal || uniqueRuleTypes.size >= AI_CONFIG.minRuleTypesForAmbiguous) {
       // Include all rules for this project
         filteredRules.push(...rules)
       } else {
@@ -367,8 +367,12 @@ function resolveConflicts(suggestions: ProjectSuggestion[]): ProjectSuggestion[]
  * )
  * // May include: "Similar to archived project 'Old Marketing'"
  * ```
+ *
+ * Note: Currently unused - planned for Phase 5
  */
-async function handleArchivedProjectMatches(
+// @ts-expect-error - Planned for Phase 5
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function _handleArchivedProjectMatches(
   prisma: PrismaClient,
   userId: string,
   event: CalendarEventInput,
@@ -421,7 +425,9 @@ async function handleArchivedProjectMatches(
     const eventPatterns = extractPatternsFromEvent(event)
 
     // Find active projects that share similar patterns
-    const similarProjects = await prisma.categoryRule.groupBy({
+    // @ts-expect-error - Planned for Phase 5
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const _similarProjects = await prisma.categoryRule.groupBy({
       by: ['projectId'],
       where: {
         userId,

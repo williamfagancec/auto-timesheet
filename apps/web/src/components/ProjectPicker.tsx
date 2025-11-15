@@ -191,7 +191,7 @@ export function ProjectPicker({
 
               {/* Recent Projects Section */}
               {recentProjects.length > 0 && (
-                <Command.Group heading="Recent">
+                <Command.Group>
                   {recentProjects.map((project) => (
                     <Command.Item
                       key={project.id}

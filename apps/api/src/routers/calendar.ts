@@ -227,6 +227,8 @@ export const calendarRouter = router({
         isSkipped: event.entry?.isSkipped || false,
         projectName: event.entry?.project?.name,
         projectId: event.entry?.projectId,
+        isBillable: event.entry?.isBillable ?? true,
+        phase: event.entry?.phase ?? null,
       }))
     }),
 

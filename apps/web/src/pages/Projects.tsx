@@ -6,7 +6,7 @@ import { trpc } from '../lib/trpc'
 export function Projects() {
   const [search, setSearch] = useState('')
   const [showArchived, setShowArchived] = useState(false)
-  const [sortBy, setSortBy] = useState<'name' | 'lastUsedAt' | 'useCount'>('lastUsedAt')
+  const [sortBy, setSortBy] = useState<'name' | 'lastUsedAt' | 'useCount' | 'hours30Days'>('lastUsedAt')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
 
@@ -126,7 +126,7 @@ export function Projects() {
             >
               <option value="lastUsedAt">Last Used</option>
               <option value="name">Name (A-Z)</option>
-              <option value="useCount">Most Used</option>
+              <option value="hours30Days">Most Hours (30 days)</option>
             </select>
           </div>
 
@@ -178,7 +178,7 @@ export function Projects() {
                   Last Used
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Use Count
+                  Hours (30 days)
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Status
@@ -215,7 +215,11 @@ export function Projects() {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{project.useCount}</div>
+                    <div className="text-sm text-gray-900">
+                      {typeof (project as any).hours30Days === 'number' 
+                        ? (project as any).hours30Days.toFixed(1)
+                        : '0.0'}
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     {project.isArchived ? (
@@ -268,7 +272,7 @@ export function Projects() {
         <h3 className="text-sm font-medium text-blue-900 mb-2">Tips</h3>
         <ul className="text-sm text-blue-800 space-y-1">
           <li>• Projects are created automatically when you categorize events</li>
-          <li>• Use Count shows how many times you've used this project</li>
+          <li>• Hours (30 days) shows total hours spent on this project in the past 30 days</li>
           <li>• Archived projects won't appear in the project picker</li>
           <li>• Click "Edit" to rename a project</li>
         </ul>
