@@ -18,18 +18,38 @@ const server = Fastify({
 
 // Register plugins
 await server.register(cors, {
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  // Support multiple origins for production (Vercel) and development (localhost)
+  origin: (origin, cb) => {
+    const allowedOrigins = [
+      process.env.FRONTEND_URL || 'http://localhost:3000',
+      'http://localhost:3000', // Always allow localhost for development
+    ]
+    // Allow requests with no origin (same-origin requests, curl, etc.)
+    if (!origin || allowedOrigins.includes(origin)) {
+      cb(null, true)
+    } else {
+      console.warn(`[CORS] Blocked request from origin: ${origin}`)
+      cb(new Error('Not allowed by CORS'), false)
+    }
+  },
   credentials: true,
 })
 
 await server.register(cookie)
 
 // Register rate limiting
+// In production: per-IP limiting with higher limits for concurrent users
+// In development: localhost is allowed without rate limiting
 await server.register(rateLimit, {
-  max: 100, // Maximum 100 requests
-  timeWindow: '1 minute', // Per minute
-  cache: 10000, // Cache size
-  allowList: ['127.0.0.1'], // Whitelist localhost for development
+  max: 200, // Increased from 100 for 8 concurrent users
+  timeWindow: '1 minute',
+  cache: 10000,
+  // Per-IP rate limiting instead of global
+  keyGenerator: (request) => {
+    return request.ip || request.headers['x-forwarded-for'] as string || 'unknown'
+  },
+  // Only allowlist localhost in development
+  allowList: process.env.NODE_ENV !== 'production' ? ['127.0.0.1'] : [],
   addHeaders: {
     'x-ratelimit-limit': true,
     'x-ratelimit-remaining': true,
@@ -46,9 +66,42 @@ await server.register(fastifyTRPCPlugin, {
   },
 })
 
-// Health check endpoint
+// Health check endpoint - verifies database and Redis connectivity
 server.get('/health', async () => {
-  return { status: 'ok', timestamp: new Date().toISOString() }
+  const checks: Record<string, string> = {}
+  let healthy = true
+
+  // Check database connectivity
+  try {
+    const { prisma } = await import('database')
+    await prisma.$queryRaw`SELECT 1`
+    checks.database = 'ok'
+  } catch (error) {
+    checks.database = 'error'
+    healthy = false
+    console.error('[Health Check] Database connection failed:', error)
+  }
+
+  // Check Redis connectivity (BullMQ)
+  try {
+    const { calendarSyncQueue } = await import('./jobs/calendar-sync-job.js')
+    const isPaused = await calendarSyncQueue.isPaused()
+    checks.redis = isPaused ? 'paused' : 'ok'
+  } catch (error) {
+    checks.redis = 'error'
+    healthy = false
+    console.error('[Health Check] Redis connection failed:', error)
+  }
+
+  const status = healthy ? 'ok' : 'degraded'
+
+  return {
+    status,
+    timestamp: new Date().toISOString(),
+    checks,
+    version: process.env.npm_package_version || '0.1.0',
+    environment: process.env.NODE_ENV || 'development',
+  }
 })
 
 // Google OAuth callback endpoint - handles the full OAuth flow
@@ -179,6 +232,32 @@ server.get('/auth/google/callback', async (request, reply) => {
 
 // Start server
 try {
+  // Validate database connection before starting
+  console.log('[Startup] Validating database connection...')
+  const { prisma } = await import('database')
+  await prisma.$queryRaw`SELECT 1`
+  console.log('[Startup] Database connection validated')
+
+  // Validate Redis connection before starting (in production)
+  if (process.env.NODE_ENV === 'production' || process.env.REDIS_URL) {
+    console.log('[Startup] Validating Redis connection...')
+    try {
+      const { calendarSyncQueue } = await import('./jobs/calendar-sync-job.js')
+      // Try to check queue status - this will fail if Redis is not available
+      await calendarSyncQueue.getJobCounts()
+      console.log('[Startup] Redis connection validated')
+    } catch (redisError) {
+      console.error('[Startup] Redis connection failed:', redisError)
+      console.error('[Startup] BullMQ requires Redis for background jobs. Please check REDIS_URL.')
+      // In production, fail fast if Redis is not available
+      if (process.env.NODE_ENV === 'production') {
+        process.exit(1)
+      } else {
+        console.warn('[Startup] Continuing without Redis (development mode)')
+      }
+    }
+  }
+
   await server.listen({ port: PORT, host: HOST })
   console.log(`Server listening on http://${HOST}:${PORT}`)
 
