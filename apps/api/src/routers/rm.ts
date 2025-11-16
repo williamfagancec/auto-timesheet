@@ -10,6 +10,7 @@ import { prisma } from "database";
 import * as RMConnection from "../services/rm-connection.js";
 import { rmApi } from "../services/rm-api.js";
 import { suggestMatches, getAutoMapSuggestions } from "../services/rm-project-matching.js";
+import { syncTimeEntries } from "../services/rm-sync.js";
 
 /**
  * Zod Schemas
@@ -33,6 +34,18 @@ const CreateBulkMappingsInput = z.array(CreateMappingInput);
 
 const DeleteMappingInput = z.object({
   id: z.string().min(1, "Mapping ID is required"),
+});
+
+const SyncExecuteInput = z.object({
+  weekStartDate: z.string().datetime(),
+});
+
+const SyncStatusInput = z.object({
+  weekStartDate: z.string().datetime(),
+});
+
+const SyncHistoryInput = z.object({
+  limit: z.number().int().min(1).max(50).default(10),
 });
 
 /**
@@ -543,6 +556,145 @@ export const rmRouter = router({
         return {
           success: true,
         };
+      }),
+  }),
+
+  /**
+   * Time Entry Sync
+   */
+  sync: router({
+    /**
+     * Execute sync for a specific week
+     * Pushes timesheet entries to RM with change detection via SHA-256 hashing
+     */
+    execute: protectedProcedure
+      .input(SyncExecuteInput)
+      .mutation(async ({ ctx, input }) => {
+        const weekStart = new Date(input.weekStartDate);
+
+        // Validate Monday (day 1 in JavaScript Date)
+        if (weekStart.getDay() !== 1) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "weekStartDate must be a Monday at midnight UTC",
+          });
+        }
+
+        // Check rate limiting (max 2 syncs per minute)
+        const connection = await prisma.rMConnection.findUnique({
+          where: { userId: ctx.user.id },
+        });
+
+        if (connection) {
+          const recentSyncs = await prisma.rMSyncLog.count({
+            where: {
+              connectionId: connection.id,
+              startedAt: { gte: new Date(Date.now() - 60 * 1000) }, // Last minute
+            },
+          });
+
+          if (recentSyncs >= 2) {
+            throw new TRPCError({
+              code: "TOO_MANY_REQUESTS",
+              message: "Please wait before syncing again (max 2 syncs per minute)",
+            });
+          }
+        }
+
+        try {
+          const result = await syncTimeEntries(ctx.user.id, weekStart);
+
+          return {
+            success: true,
+            ...result,
+          };
+        } catch (error) {
+          console.error("[RM Sync] Failed:", error);
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: error instanceof Error ? error.message : "Sync failed",
+          });
+        }
+      }),
+
+    /**
+     * Get sync status for a specific week
+     * Returns last sync time and count of synced entries
+     */
+    getStatus: protectedProcedure
+      .input(SyncStatusInput)
+      .query(async ({ ctx, input }) => {
+        const weekStart = new Date(input.weekStartDate);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 7);
+
+        const connection = await prisma.rMConnection.findUnique({
+          where: { userId: ctx.user.id },
+        });
+
+        if (!connection) {
+          return null;
+        }
+
+        // Count synced entries for this week
+        const syncedEntries = await prisma.rMSyncedEntry.findMany({
+          where: {
+            timesheetEntry: {
+              userId: ctx.user.id,
+              date: { gte: weekStart, lt: weekEnd },
+            },
+          },
+          select: {
+            lastSyncedAt: true,
+          },
+        });
+
+        if (syncedEntries.length === 0) {
+          return null;
+        }
+
+        const lastSync = syncedEntries.reduce((latest, entry) => {
+          return entry.lastSyncedAt > latest ? entry.lastSyncedAt : latest;
+        }, syncedEntries[0].lastSyncedAt);
+
+        return {
+          lastSyncAt: lastSync.toISOString(),
+          syncedCount: syncedEntries.length,
+        };
+      }),
+
+    /**
+     * Get recent sync history
+     * Returns log of recent sync operations with statistics
+     */
+    history: protectedProcedure
+      .input(SyncHistoryInput)
+      .query(async ({ ctx, input }) => {
+        const connection = await prisma.rMConnection.findUnique({
+          where: { userId: ctx.user.id },
+        });
+
+        if (!connection) {
+          return [];
+        }
+
+        const logs = await prisma.rMSyncLog.findMany({
+          where: { connectionId: connection.id },
+          orderBy: { startedAt: "desc" },
+          take: input.limit,
+        });
+
+        return logs.map((log) => ({
+          id: log.id,
+          status: log.status,
+          entriesAttempted: log.entriesAttempted,
+          entriesSuccess: log.entriesSuccess,
+          entriesFailed: log.entriesFailed,
+          entriesSkipped: log.entriesSkipped,
+          errorMessage: log.errorMessage,
+          startedAt: log.startedAt.toISOString(),
+          completedAt: log.completedAt?.toISOString() || null,
+        }));
       }),
   }),
 });
