@@ -287,6 +287,8 @@ model RMSyncLog {
 
   @@index([connectionId])
   @@index([status])
+  // NOTE: Partial unique index on (connectionId) WHERE status='RUNNING' is enforced
+  // via raw SQL migration to prevent race conditions. Only one RUNNING sync per connection allowed.
 }
 
 enum RMSyncStatus {
