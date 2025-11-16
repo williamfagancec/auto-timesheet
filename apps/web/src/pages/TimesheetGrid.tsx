@@ -92,6 +92,19 @@ export function TimesheetGrid() {
     },
   })
 
+  // Reset to events mutation - removes all manual entries
+  const resetToEventsMutation = trpc.timesheet.resetToEvents.useMutation({
+    onSuccess: (result) => {
+      // Refetch grid data to show event-sourced entries only
+      utils.timesheet.getWeeklyGrid.invalidate({ weekStartDate: weekStart.toISOString() })
+      alert(`Successfully reset timesheet. Removed ${result.deletedCount} manual entries.`)
+    },
+    onError: (err) => {
+      console.error('Failed to reset timesheet:', err)
+      alert('Failed to reset timesheet. Please try again.')
+    },
+  })
+
   // Navigate weeks
   const handlePrevWeek = () => {
     setWeekStart((prev) => subWeeks(prev, 1))
@@ -103,6 +116,19 @@ export function TimesheetGrid() {
 
   const handleThisWeek = () => {
     setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))
+  }
+
+  // Handle reset to events
+  const handleResetToEvents = () => {
+    const confirmed = window.confirm(
+      'This will remove all manual entries and adjustments for this week, keeping only hours from categorized calendar events. This action cannot be undone. Continue?'
+    )
+
+    if (confirmed) {
+      resetToEventsMutation.mutate({
+        weekStartDate: weekStart.toISOString(),
+      })
+    }
   }
 
   // Handle clicks outside notes to close it
@@ -311,8 +337,17 @@ export function TimesheetGrid() {
           </p>
         </div>
 
-        {/* Week Navigation */}
+        {/* Week Navigation & Actions */}
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleResetToEvents}
+            disabled={resetToEventsMutation.isPending}
+            className="px-4 py-2 border border-orange-500 text-orange-600 rounded-md hover:bg-orange-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Remove all manual entries and keep only hours from categorized calendar events"
+          >
+            {resetToEventsMutation.isPending ? 'Resetting...' : 'Reset to Events'}
+          </button>
+          <div className="w-px h-8 bg-gray-300 mx-1"></div>
           <button
             onClick={handlePrevWeek}
             className="px-3 py-2 border rounded-md hover:bg-gray-50"
@@ -332,6 +367,23 @@ export function TimesheetGrid() {
           >
             Next →
           </button>
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="mb-4 flex items-center gap-6 text-sm text-gray-600">
+        <span className="font-medium">Cell colors:</span>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 bg-blue-50 border border-gray-300 rounded"></div>
+          <span>From events</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 bg-orange-50 border border-gray-300 rounded"></div>
+          <span>Manual entry</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 bg-yellow-50 border border-gray-300 rounded"></div>
+          <span>Mixed (events + manual)</span>
         </div>
       </div>
 
@@ -367,9 +419,16 @@ export function TimesheetGrid() {
                 </td>
                 {DAY_NAMES.map((day) => {
                   const hours = project.dailyHours[day.key]
+                  const eventHrs = project.eventHours[day.key] || 0
+                  const manualHrs = project.manualHours[day.key] || 0
                   const isActive = activeCell?.projectId === project.id && activeCell?.day === day.key
                   const key = `${project.id}-${day.key}`
                   const isEditing = editingCells.has(key)
+
+                  // Determine cell type for visual styling
+                  const hasEvents = eventHrs > 0
+                  const hasManual = manualHrs > 0
+                  const cellType = hasEvents && hasManual ? 'mixed' : hasEvents ? 'event' : hasManual ? 'manual' : 'empty'
 
                   // Display logic:
                   // 1. If cell is being edited AND has pending value, show pending value
@@ -378,15 +437,24 @@ export function TimesheetGrid() {
                     ? pendingValue[key]
                     : formatHours(hours)
 
+                  // Build tooltip showing breakdown
+                  const tooltipText = hours > 0
+                    ? `Total: ${formatHours(hours)}h${eventHrs > 0 ? ` | Events: ${formatHours(eventHrs)}h` : ''}${manualHrs > 0 ? ` | Manual: ${formatHours(manualHrs)}h` : ''}`
+                    : 'Click to add hours'
+
                   return (
                     <td
                       key={day.key}
-                      className={`text-center p-2 border-r cursor-pointer ${
-                        hours > 0 ? 'bg-white' : 'bg-gray-50'
+                      className={`text-center p-2 border-r cursor-pointer relative ${
+                        cellType === 'event' ? 'bg-blue-50' :
+                        cellType === 'mixed' ? 'bg-yellow-50' :
+                        cellType === 'manual' ? 'bg-orange-50' :
+                        'bg-gray-50'
                       } ${
                         isActive ? 'ring-2 ring-blue-500 ring-inset' : ''
                       }`}
                       onClick={() => handleCellClick(project.id, day.key)}
+                      title={tooltipText}
                     >
                       <input
                         type="number"

@@ -573,6 +573,14 @@ Get timesheet data in grid format for weekly view.
       sat: number
       sun: number
     }
+    eventHours: {
+      mon: number
+      // ... hours from categorized events per day
+    }
+    manualHours: {
+      mon: number
+      // ... hours from manual entries per day
+    }
     notes: {
       mon: string
       // ... notes for each day
@@ -588,6 +596,12 @@ Get timesheet data in grid format for weekly view.
 }
 ```
 
+**Logic:**
+- `dailyHours`: Total hours per day (eventHours + manualHours)
+- `eventHours`: Hours from entries linked to calendar events (eventId != null)
+- `manualHours`: Hours from manual entries (eventId == null)
+- Used for visual indicators in UI (blue = event, orange = manual, yellow = mixed)
+
 ---
 
 ### timesheet.updateCell
@@ -601,12 +615,107 @@ Update hours/notes for a specific project/day cell.
   date: string
   hours: number
   notes?: string
+  isBillable?: boolean
+  phase?: string
 }
 ```
 
 **Output:**
 ```typescript
-{ success: boolean }
+{
+  success: boolean
+  updatedHours: number
+}
+```
+
+**Logic:**
+- Deletes all existing manual entries for this project/day
+- Creates new manual adjustment entry if hours differ from event-sourced hours
+- Updates notes/billable/phase on first event entry if provided
+
+---
+
+### timesheet.resetToEvents
+
+Reset timesheet to match categorized calendar events only. Removes all manual entries and adjustments for a given week.
+
+**Type:** Mutation (destructive)
+
+**Input:**
+```typescript
+{
+  weekStartDate: string  // Must be Monday at midnight UTC (ISO datetime)
+}
+```
+
+**Output:**
+```typescript
+{
+  success: boolean
+  deletedCount: number   // Number of manual entries removed
+}
+```
+
+**Logic:**
+1. Validates weekStartDate is a Monday (throws BAD_REQUEST if not)
+2. Calculates week range (Monday to Sunday)
+3. Deletes all entries where:
+   - `isManual: true` OR
+   - `eventId: null` (no linked calendar event)
+4. Returns count of deleted entries
+5. Leaves event-sourced entries (linked via eventId) intact
+
+**Example Request:**
+```typescript
+const result = await trpc.timesheet.resetToEvents.mutate({
+  weekStartDate: '2024-01-01T00:00:00.000Z',  // Monday
+})
+
+// Response:
+// { success: true, deletedCount: 5 }
+```
+
+**Use Case:**
+- User categorizes events totaling 20 hours
+- User manually adds 5 hours in timesheet
+- User clicks "Reset to Events"
+- System removes the 5 manual hours, returns to 20 hours from events
+
+**Auto-Sync Behavior:**
+When events are recategorized (e.g., Event A moves from Project X to Project Y), the system automatically:
+1. Updates the linked timesheet entry to Project Y
+2. Deletes any manual adjustment entries from Project X for that date
+3. Ensures timesheet dynamically reflects event categorization changes
+
+**Errors:**
+- `BAD_REQUEST` - weekStartDate is not a Monday
+- `UNAUTHORIZED` - User not authenticated
+- `INTERNAL_SERVER_ERROR` - Database operation failed
+
+**Status:** Fully implemented with comprehensive test coverage.
+
+---
+
+### timesheet.assignEventToProject
+
+Assign uncategorized events to a project.
+
+**Input:**
+```typescript
+{
+  eventIds: string[]      // 1-100 events
+  projectId: string
+  isBillable?: boolean
+  phase?: string
+}
+```
+
+**Output:**
+```typescript
+{
+  success: boolean
+  assignedCount: number
+}
 ```
 
 ---
@@ -676,5 +785,5 @@ No breaking changes to existing API contracts.
 
 ---
 
-**Last Updated:** 2025-01-09
-**Status:** Phase 0 - Documentation Complete
+**Last Updated:** 2025-11-16
+**Status:** Phase 0 - Documentation Complete + Reset to Events feature documented
