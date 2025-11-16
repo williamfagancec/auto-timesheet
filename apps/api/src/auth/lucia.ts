@@ -9,9 +9,11 @@ const adapter = new PrismaAdapter(prisma.session, prisma.user);
 export const lucia = new Lucia(adapter, {
   sessionCookie: {
     attributes: {
-      // Using Vite proxy, all requests appear same-origin, so 'lax' works fine
+      // In production: Vercel (frontend) and Railway (API) are different domains
+      // SameSite=none + Secure=true allows cross-domain cookies
+      // In development: Vite proxy makes requests same-origin, so 'lax' works
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax", // CSRF protection
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     },
   },
   getUserAttributes: (attributes) => {

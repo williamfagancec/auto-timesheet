@@ -1,0 +1,49 @@
+# Dependencies
+node_modules
+**/node_modules
+
+# Build outputs (we'll rebuild in Docker)
+dist
+**/dist
+.next
+**/.next
+
+# Development files
+.git
+.gitignore
+*.md
+LICENSE
+
+# IDE and OS files
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Environment files (these should be set in Railway)
+.env
+.env.*
+!.env.example
+
+# Test files
+**/__tests__
+**/*.test.ts
+**/*.spec.ts
+coverage
+.nyc_output
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Prisma migrations (schema is still needed)
+# packages/database/prisma/migrations - Actually keep these for migrate deploy
+
+# Documentation
+docs
+
+# Turborepo
+.turbo

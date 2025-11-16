@@ -55,8 +55,18 @@ function App() {
     trpc.createClient({
       links: [
         httpBatchLink({
-          // Use relative URL to leverage Vite proxy - avoids cross-origin cookie issues
-          url: '/trpc',
+          // In development: Use relative URL to leverage Vite proxy
+          // In production: Use absolute URL from environment variable
+          url: import.meta.env.VITE_API_URL
+            ? `${import.meta.env.VITE_API_URL}/trpc`
+            : '/trpc',
+          // Include credentials for cross-origin requests (production)
+          fetch(url, options) {
+            return fetch(url, {
+              ...options,
+              credentials: 'include',
+            })
+          },
         }),
       ],
     })
