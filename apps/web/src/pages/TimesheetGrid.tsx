@@ -92,19 +92,6 @@ export function TimesheetGrid() {
     },
   })
 
-    const resetToEventsMutation = trpc.timesheet.resetToEvents.useMutation({
-      onSuccess: (result, variables) => {
-        utils.timesheet.getWeeklyGrid.invalidate({ weekStartDate: variables.weekStartDate })
-      },
-    })
-      alert(`Successfully reset timesheet. Removed ${result.deletedCount} manual entries.`)
-    },
-    onError: (err) => {
-      console.error('Failed to reset timesheet:', err)
-      alert('Failed to reset timesheet. Please try again.')
-    },
-  })
-
   // Navigate weeks
   const handlePrevWeek = () => {
     setWeekStart((prev) => subWeeks(prev, 1))
@@ -117,19 +104,6 @@ export function TimesheetGrid() {
   const handleThisWeek = () => {
     setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))
   }
-
-  // Handle reset to events
-  const resetToEventsMutation = trpc.timesheet.resetToEvents.useMutation({
-    onSuccess: (result) => {
-      // Refetch grid data to show event-sourced entries only
-      utils.timesheet.getWeeklyGrid.invalidate({ weekStartDate: weekStart.toISOString})
-      alert(`Succesfully reset timesheet. Removed ${result.deletedCount} manual entries.`)
-    },
-    onError: (err) => {
-      console.error('Failed to reset timesheet:', err)
-      alert('Failed to reset timesheet. Please try again')
-    },
-  })
 
   // Handle clicks outside notes to close it
   useEffect(() => {
@@ -338,14 +312,7 @@ export function TimesheetGrid() {
         </div>
 
         {/* Week Navigation & Actions */}
-        updateCellMutation.mutate({
-          projectId,
-          date: cellDate.toISOSString(),
-          hours: roundedHours,
-          notes: activeCell?.projectId === projectId && activeCell?.day === day ? notes : undefined,
-          isBillable: activeCell?.projectId === projectID && activeCell?.day === day ? isBillable : undefined,
-          phase: activeCell?.projectId === projectId && activeCell?.day === day ? (phase || undefined) : undefined,
-        })
+        <div className="flex gap-2">
           <button
             onClick={handlePrevWeek}
             className="px-3 py-2 border rounded-md hover:bg-gray-50"
