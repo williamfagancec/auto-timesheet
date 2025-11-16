@@ -331,6 +331,84 @@ pnpm db:seed          # Seed AI test data
 - `apps/web/src/pages/Projects.tsx` - Updated to display hours instead of use count
 - `packages/database/prisma/schema.prisma` - UserProjectDefaults model (already present)
 
+### 🔄 Reset to Events - Complete (2025-11-16)
+
+**Status:** Fully implemented with auto-sync, visual indicators, and comprehensive test coverage (12 tests).
+
+**Core Functionality:**
+- **Reset Endpoint** (`apps/api/src/routers/timesheet.ts:709-758`): Removes all manual entries for a given week, keeping only event-sourced hours
+- **Auto-Sync on Recategorization**: When events are recategorized between projects, manual adjustments are automatically cleaned up to prevent drift
+- **Event vs Manual Tracking**: Weekly grid returns separate `eventHours` and `manualHours` for each day
+
+**API Endpoint (`apps/api/src/routers/timesheet.ts`):**
+- `timesheet.resetToEvents` - Mutation that deletes manual entries for specified week (Monday-Sunday)
+  - Input: `weekStartDate` (must be Monday at midnight UTC)
+  - Output: `{ success: boolean, deletedCount: number }`
+  - Validates Monday requirement, throws BAD_REQUEST if not
+  - Deletes entries where `isManual: true` OR `eventId: null`
+  - Returns count of deleted entries for user feedback
+
+**Auto-Sync Logic:**
+- Enhanced `bulkCategorize` (lines 327-360): Cleans up manual entries when recategorizing events
+- Enhanced `assignEventToProject` (lines 776-807): Same cleanup behavior
+- When Event A moves from Project X to Project Y:
+  - Updates linked timesheet entry to Project Y
+  - Deletes manual adjustment entries from Project X for that date
+  - Ensures timesheet dynamically reflects event categorization
+
+**Frontend UI (`apps/web/src/pages/TimesheetGrid.tsx`):**
+- **Reset Button** (lines 342-349): Orange button in header with confirmation dialog
+  - Warns user action is irreversible
+  - Shows success message with deleted count
+  - Disabled state while mutation pending
+- **Visual Indicators** (lines 373-388, 404-441): Color-coded cells distinguish entry types
+  - Blue background: Event-sourced hours only
+  - Orange background: Manual entries only
+  - Yellow background: Mixed (both event + manual)
+  - Gray background: Empty
+- **Legend** (lines 373-388): Explains color scheme above grid
+- **Tooltips** (lines 424-426): Show breakdown (e.g., "Total: 8h | Events: 6h | Manual: 2h")
+
+**Use Cases:**
+1. **Reset scenario**: User categorizes events (20 hours) → manually adds 5 hours → clicks "Reset to Events" → returns to 20 hours
+2. **Auto-sync scenario**: Event A categorized to Project X → user manually adds 2 hours to Project X → event recategorized to Project Y → manual 2 hours automatically removed from Project X
+
+**Testing (`apps/api/src/routers/__tests__/timesheet-reset.test.ts`):**
+- **12 comprehensive test cases** covering:
+  - Reset functionality: happy path, zero entries, validation errors, database errors
+  - Auto-sync cleanup: recategorization, new entry creation, user ownership validation
+  - Weekly grid: event vs manual hour separation for various scenarios
+- Mock-based unit tests following existing codebase patterns
+- Tests cannot run currently due to missing Vite dependency (known issue)
+
+**Technical Implementation:**
+- Uses existing `TimesheetEntry.eventId` field (no schema changes required)
+- Efficient single `deleteMany` operation with compound WHERE clause
+- Transaction-based updates in categorization endpoints ensure atomicity
+- React Query cache invalidation for real-time grid updates
+
+**Design Decisions:**
+- Week-based reset (Monday-Sunday) matches timesheet grid view
+- Auto-cleanup on recategorization aligns with "events as source of truth" philosophy
+- Visual indicators help users understand what will be affected by reset
+- Confirmation dialog prevents accidental data loss
+
+**Documentation:**
+- API endpoint documented in `docs/API.md`
+- Auto-sync behavior explained in endpoint documentation
+- Visual indicator legend shown in UI
+
+**Future Considerations (from validation):**
+- Monitor user feedback on auto-cleanup behavior (may surprise some users)
+- Consider preview of what will be deleted before confirming reset
+- Consider endpoint-specific rate limiting (currently uses global 100 req/min)
+
+**Files Modified:**
+- `apps/api/src/routers/timesheet.ts` - Reset endpoint + auto-sync logic
+- `apps/web/src/pages/TimesheetGrid.tsx` - Reset button + visual indicators
+- `apps/api/src/routers/__tests__/timesheet-reset.test.ts` - Test suite (NEW)
+- `docs/API.md` - API documentation updated
+
 ---
 
 ### 🚧 Partially Implemented
@@ -345,7 +423,7 @@ pnpm db:seed          # Seed AI test data
 
 **Frontend:** Settings page, manual time entry UI
 
-**Testing & Deployment:** No tests (0% coverage), no CI/CD, no monitoring/error tracking
+**Testing & Deployment:** Limited test coverage (timesheet reset + analytics services only), no CI/CD, no monitoring/error tracking
 
 ### Next Priorities
 

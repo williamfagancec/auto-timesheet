@@ -105,6 +105,27 @@ export const timesheetRouter = router({
           sun: undefined,
         }
 
+        // Track event-sourced hours separately for visual indicators
+        const eventHours: Record<string, number> = {
+          mon: 0,
+          tue: 0,
+          wed: 0,
+          thu: 0,
+          fri: 0,
+          sat: 0,
+          sun: 0,
+        }
+
+        const manualHours: Record<string, number> = {
+          mon: 0,
+          tue: 0,
+          wed: 0,
+          thu: 0,
+          fri: 0,
+          sat: 0,
+          sun: 0,
+        }
+
         // Aggregate entries for this project
         const projectEntries = entries.filter((e) => e.projectId === project.id)
 
@@ -114,6 +135,13 @@ export const timesheetRouter = router({
           const hours = entry.duration / 60 // Convert minutes to hours
 
           dailyHours[dayName] = (dailyHours[dayName] || 0) + hours
+
+          // Track event vs manual hours
+          if (entry.eventId) {
+            eventHours[dayName] = (eventHours[dayName] || 0) + hours
+          } else {
+            manualHours[dayName] = (manualHours[dayName] || 0) + hours
+          }
 
           // Concatenate notes if multiple entries exist
           if (entry.notes) {
@@ -134,6 +162,8 @@ export const timesheetRouter = router({
           dailyHours,
           weeklyTotal,
           notes,
+          eventHours, // Hours from categorized calendar events
+          manualHours, // Hours from manual entries/adjustments
         }
       })
 
@@ -325,6 +355,27 @@ export const timesheetRouter = router({
               })
 
               if (existingEntry) {
+                // If project is changing, clean up any manual adjustment entries from the old project/date
+                if (existingEntry.projectId !== entry.projectId && existingEntry.projectId) {
+                  const dateStart = new Date(event.startTime)
+                  dateStart.setHours(0, 0, 0, 0)
+                  const dateEnd = new Date(dateStart)
+                  dateEnd.setDate(dateEnd.getDate() + 1)
+
+                  await tx.timesheetEntry.deleteMany({
+                    where: {
+                      userId: ctx.user.id,
+                      projectId: existingEntry.projectId,
+                      date: {
+                        gte: dateStart,
+                        lt: dateEnd,
+                      },
+                      isManual: true,
+                      eventId: null,
+                    },
+                  })
+                }
+
                 // Update existing entry
                 await tx.timesheetEntry.update({
                   where: { id: existingEntry.id },
@@ -686,6 +737,57 @@ export const timesheetRouter = router({
     }),
 
   /**
+   * Reset timesheet to match categorized events only
+   * Removes all manual entries and adjustments, keeping only event-sourced entries
+   */
+  resetToEvents: protectedProcedure
+    .input(
+      z.object({
+        weekStartDate: z.string().datetime(), // Monday at midnight UTC
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const weekStart = new Date(input.weekStartDate)
+      const dayOfWeek = weekStart.getDay()
+      if (dayOfWeek !== 1) { // 1 = Monday
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'weekStartDate must be a Monday at midnight UTC',
+        })
+      }
+      const weekEnd = new Date(weekStart)
+      weekEnd.setDate(weekEnd.getDate() + 7) // Add 7 days
+
+      try {
+        // Delete all manual entries (no eventId or isManual=true) for the week
+        const result = await prisma.timesheetEntry.deleteMany({
+          where: {
+            userId: ctx.user.id,
+            date: {
+              gte: weekStart,
+              lt: weekEnd,
+            },
+            OR: [
+              { isManual: true },
+              { eventId: null },
+            ],
+          },
+        })
+
+        return {
+          success: true,
+          deletedCount: result.count,
+        }
+      } catch (error) {
+        console.error('Failed to reset timesheet to events:', error)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to reset timesheet',
+        })
+      }
+    }),
+
+  /**
    * Assign uncategorized event(s) to a project
    * Updates existing timesheet entries or creates new ones
    */
@@ -753,6 +855,27 @@ export const timesheetRouter = router({
             })
 
             if (existingEntry) {
+              // If project is changing, clean up any manual adjustment entries from the old project/date
+              if (existingEntry.projectId !== input.projectId && existingEntry.projectId) {
+                const dateStart = new Date(event.startTime)
+                dateStart.setHours(0, 0, 0, 0)
+                const dateEnd = new Date(dateStart)
+                dateEnd.setDate(dateEnd.getDate() + 1)
+
+                await tx.timesheetEntry.deleteMany({
+                  where: {
+                    userId: ctx.user.id,
+                    projectId: existingEntry.projectId,
+                    date: {
+                      gte: dateStart,
+                      lt: dateEnd,
+                    },
+                    isManual: true,
+                    eventId: null,
+                  },
+                })
+              }
+
               // Update existing entry with new project
               await tx.timesheetEntry.update({
                 where: { id: existingEntry.id },
