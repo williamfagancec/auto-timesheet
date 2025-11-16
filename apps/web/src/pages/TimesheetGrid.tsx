@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { format, startOfWeek, endOfWeek, addWeeks, subWeeks } from 'date-fns'
+import { format, startOfWeek, endOfWeek, addWeeks, subWeek, addDays } from 'date-fns'
 import { trpc } from '../lib/trpc'
 
 type DayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
@@ -58,15 +58,6 @@ export function TimesheetGrid() {
     weekStartDate: weekStart.toISOString(),
   })
 
-  // Clear editing state when fresh data arrives from server
-  useEffect(() => {
-    if (gridData && !isLoading) {
-      // Clear all editing states and pending values when new data is loaded
-      setEditingCells(new Set())
-      setPendingValue({})
-    }
-  }, [gridData, isLoading])
-
   // Fetch user defaults for billable and phase
   const { data: userDefaults } = trpc.project.getDefaults.useQuery(undefined, {
     retry: 1,
@@ -91,6 +82,14 @@ export function TimesheetGrid() {
       setEditingCells(new Set())
     },
   })
+
+    // Clear editing state when fresh data arrives from server
+    useEffect(() => {
+      if (gridData && !isLoading && !updateCellMutation.isPending) {
+        setEditingCells(new Set())
+        setPendingValue({})
+      }
+    }, [gridData, isLoading, updateCellMutation.isPending])
 
   // Navigate weeks
   const handlePrevWeek = () => {
@@ -162,8 +161,7 @@ export function TimesheetGrid() {
     if (!value || value.trim() === '') {
       // Empty value - send 0 hours to delete manual entries
       const dayIndex = DAY_NAMES.findIndex((d) => d.key === day)
-      const cellDate = new Date(weekStart)
-      cellDate.setDate(cellDate.getDate() + dayIndex)
+      const cellDate = addDays(weekStart, dayIndex)
 
       // Update cell on server with 0 hours
       updateCellMutation.mutate({
@@ -220,8 +218,7 @@ export function TimesheetGrid() {
 
     // Calculate the date for this day
     const dayIndex = DAY_NAMES.findIndex((d) => d.key === day)
-    const cellDate = new Date(weekStart)
-    cellDate.setDate(cellDate.getDate() + dayIndex)
+    const cellDate = addDays(weekStart, dayIndex)
 
     // Update pending value to show rounded value immediately
     setPendingValue((prev) => ({ ...prev, [key]: formatHours(roundedHours) }))
@@ -256,8 +253,7 @@ export function TimesheetGrid() {
 
     // Calculate the date for this day
     const dayIndex = DAY_NAMES.findIndex((d) => d.key === activeCell.day)
-    const cellDate = new Date(weekStart)
-    cellDate.setDate(cellDate.getDate() + dayIndex)
+    const cellDate = addDays(weekStart, dayIndex)
 
     // Update with notes, billable, and phase
     updateCellMutation.mutate({
