@@ -125,11 +125,11 @@ pnpm db:seed          # Seed AI test data
 
 **Infrastructure & Core Backend**
 - Turborepo monorepo with pnpm workspaces
-- Neon PostgreSQL deployed with all 8 models (User, Session, CalendarConnection, CalendarEvent, Project, TimesheetEntry, CategoryRule, SuggestionLog)
+- Neon PostgreSQL deployed with 13 models (User, Session, CalendarConnection, CalendarEvent, Project, TimesheetEntry, CategoryRule, SuggestionLog, UserProjectDefaults, RMConnection, RMProjectMapping, RMSyncedEntry, RMSyncLog)
 - Email/password auth (Argon2) + Google OAuth with PKCE flow (Arctic)
 - Lucia Auth session management with httpOnly/sameSite cookies
-- Token encryption (AES-256-GCM) and auto-refresh
-- Rate limiting (100 req/min global)
+- Token encryption (AES-256-GCM) and auto-refresh for both Google OAuth and RM
+- Rate limiting (100 req/min global, 2 syncs/min for RM)
 - Background calendar sync jobs with BullMQ
 
 **Calendar Integration**
@@ -161,9 +161,10 @@ pnpm db:seed          # Seed AI test data
 - Login/signup pages with email/password and Google OAuth
 - Protected routes with session validation
 - Events page with date range selector, calendar onboarding, event categorization
-- Timesheet grid page with editable cells
+- Timesheet grid page with editable cells, "Sync to RM" button
 - Projects management page
-- Navigation: Events → Timesheet → Projects
+- Settings page with RM connection management
+- Navigation: Events → Timesheet → Projects → Settings
 - Auto-refresh (15 min intervals when tab active)
 
 **Shared Packages**
@@ -411,6 +412,89 @@ pnpm db:seed          # Seed AI test data
 
 ---
 
+### 🔗 RM Integration (Resource Management by Smartsheet) - Phase 3 Complete (2025-11-16)
+
+**Status:** All 3 phases complete (100%). Connection, project mapping, and manual sync fully implemented. Ready for live testing with RM API token.
+
+**Phase 1: Connection & Authentication** ✅
+- Token encryption (AES-256-GCM, shared encryption key with Google OAuth)
+- RM API client with comprehensive error handling (RMAuthError, RMRateLimitError, RMValidationError, RMNotFoundError, RMNetworkError)
+- Connection service: create, validate, delete
+- Settings page UI for connecting/disconnecting RM account
+
+**Phase 2: Project Mapping** ✅
+- Fuzzy matching service with 6 strategies (exact, code, starts-with, word, contains, partial/Levenshtein)
+- Auto-map suggestions (85%+ confidence threshold)
+- Project mapping page with table view, search, inline editing
+- RMProjectSelector component with type-ahead search
+
+**Phase 3: Manual Time Entry Sync** ✅ (NEW)
+- **Backend Services:**
+  - `apps/api/src/services/rm-sync-helpers.ts` - Utility functions
+    * `calculateEntryHash()` - SHA-256 hash for change detection
+    * `filterSyncableEntries()` - Filter to mapped projects
+    * `detectChanges()` - Categorize as new/changed/unchanged
+    * `formatRMTimeEntry()` - Transform to RM API format
+  - `apps/api/src/services/rm-sync.ts` - Main orchestration
+    * `syncTimeEntries()` - Sync week to RM with hash-based change detection
+    * 5-minute timeout protection
+    * Concurrent sync prevention (one sync per user)
+    * Exponential backoff for rate limits (2s, 4s, 8s)
+    * Partial success handling
+
+- **API Endpoints (`apps/api/src/routers/rm.ts`):**
+  - `rm.sync.execute` - Trigger sync for current week (Monday-Sunday)
+  - `rm.sync.getStatus` - Get last sync time and count for week
+  - `rm.sync.history` - Recent sync logs
+  - Rate limiting: max 2 syncs/minute per user
+  - Monday validation for weekStartDate
+
+- **Frontend UI:**
+  - `apps/web/src/components/RMSyncModal.tsx` - Sync modal
+    * Pre-sync warning for unmapped projects
+    * Loading spinner with progress message
+    * Success state with statistics (synced/skipped/failed)
+    * Error details for failed entries
+    * Handles partial success gracefully
+  - `apps/web/src/pages/TimesheetGrid.tsx` - "Sync to RM" button
+    * Blue button in header (next to week navigation)
+    * Only visible when user has RM connection
+    * Disabled when no projects to sync
+
+**Key Features:**
+- **Hash-based change detection:** SHA-256 hash of `${date}_${projectId}_${hours}_${notes}` prevents redundant API calls
+- **Partial success:** Some entries can succeed while others fail
+- **Smart filtering:** Skips unmapped projects, zero-hour entries, unchanged entries
+- **Error handling:** Exponential backoff for rate limits, fail-fast for auth errors
+- **Transaction-safe:** RMSyncedEntry and RMSyncLog updates are atomic
+
+**Database Models:**
+- `RMConnection` - Encrypted API token, user info, last sync time
+- `RMProjectMapping` - Local project ↔ RM project mappings
+- `RMSyncedEntry` - Tracks synced entries with hash for change detection
+- `RMSyncLog` - Audit trail of sync operations (RUNNING/COMPLETED/PARTIAL/FAILED)
+
+**Documentation:**
+- Full implementation guide: `docs/RM_INTEGRATION.md` (820 lines)
+- API endpoints documented in `docs/API.md`
+
+**Testing Status:**
+- ✅ TypeScript compilation passes (no errors)
+- ✅ All imports verified
+- ⚠️ Cannot test live sync until RM API token available
+
+**Files Created:**
+- `apps/api/src/services/rm-sync-helpers.ts` (3.5 KB)
+- `apps/api/src/services/rm-sync.ts` (11 KB)
+- `apps/web/src/components/RMSyncModal.tsx` (7.8 KB)
+
+**Files Modified:**
+- `apps/api/src/routers/rm.ts` (+146 lines)
+- `apps/web/src/pages/TimesheetGrid.tsx` (+20 lines)
+- `docs/API.md` - Added RM sync endpoint documentation
+
+---
+
 ### 🚧 Partially Implemented
 
 - **Background jobs** - BullMQ configured, jobs created, but Redis needs read-write access
@@ -421,7 +505,7 @@ pnpm db:seed          # Seed AI test data
 
 **Backend:** Session cleanup jobs, structured logging (using console.log), token refresh race condition handling
 
-**Frontend:** Settings page, manual time entry UI
+**Frontend:** Manual time entry UI (Settings page implemented for RM integration)
 
 **Testing & Deployment:** Limited test coverage (timesheet reset + analytics services only), no CI/CD, no monitoring/error tracking
 

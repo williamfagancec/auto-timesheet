@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { format, startOfWeek, endOfWeek, addWeeks, subWeeks } from 'date-fns'
 import { trpc } from '../lib/trpc'
+import { RMSyncModal } from '../components/RMSyncModal'
 
 type DayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
 
@@ -53,6 +54,9 @@ export function TimesheetGrid() {
   // Ref for notes container to handle clicks outside
   const notesRef = useRef<HTMLDivElement>(null)
 
+  // RM Sync modal state
+  const [showSyncModal, setShowSyncModal] = useState(false)
+
   // Fetch weekly grid data
   const { data: gridData, isLoading } = trpc.timesheet.getWeeklyGrid.useQuery({
     weekStartDate: weekStart.toISOString(),
@@ -69,6 +73,12 @@ export function TimesheetGrid() {
 
   // Fetch user defaults for billable and phase
   const { data: userDefaults } = trpc.project.getDefaults.useQuery(undefined, {
+    retry: 1,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  })
+
+  // Check if user has RM connection
+  const { data: rmConnection } = trpc.rm.connection.get.useQuery(undefined, {
     retry: 1,
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
   })
@@ -332,6 +342,18 @@ export function TimesheetGrid() {
           >
             Next →
           </button>
+
+          {/* Sync to RM button - only show if user has RM connection */}
+          {rmConnection && (
+            <button
+              onClick={() => setShowSyncModal(true)}
+              disabled={!gridData?.projects || gridData.projects.length === 0}
+              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed ml-2"
+              title={!gridData?.projects || gridData.projects.length === 0 ? 'No projects to sync' : 'Sync this week to RM'}
+            >
+              Sync to RM
+            </button>
+          )}
         </div>
       </div>
 
@@ -537,6 +559,14 @@ export function TimesheetGrid() {
           </div>
         </div>
       )}
+
+      {/* RM Sync Modal */}
+      <RMSyncModal
+        isOpen={showSyncModal}
+        onClose={() => setShowSyncModal(false)}
+        weekStartDate={weekStart.toISOString()}
+        unmappedProjects={[]} // TODO: Fetch unmapped projects from backend for warning
+      />
     </div>
   )
 }

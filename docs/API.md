@@ -26,7 +26,8 @@ All API endpoints require authentication via Lucia Auth session cookies. Unauthe
 ├── /auth           - Authentication endpoints (login, signup, OAuth)
 ├── /calendar       - Calendar integration (list, sync, status)
 ├── /project        - Project management and AI suggestions
-└── /timesheet      - Timesheet entries and categorization
+├── /timesheet      - Timesheet entries and categorization
+└── /rm             - Resource Management (RM) integration and sync
 ```
 
 ---
@@ -720,6 +721,148 @@ Assign uncategorized events to a project.
 
 ---
 
+### rm.sync.execute
+
+Execute time entry sync to Resource Management for a specific week.
+
+**Type:** Mutation
+
+**Input:**
+```typescript
+{
+  weekStartDate: string  // ISO 8601 datetime (must be Monday at midnight UTC)
+}
+```
+
+**Output:**
+```typescript
+{
+  success: boolean
+  entriesAttempted: number      // Total entries attempted to sync
+  entriesSuccess: number        // Successfully synced entries
+  entriesFailed: number         // Failed entries
+  entriesSkipped: number        // Unchanged entries (skipped via hash)
+  unmappedProjects: Array<{     // Projects without RM mappings
+    id: string
+    name: string
+  }>
+  errors: Array<{               // Per-entry errors
+    entryId: string
+    error: string
+  }>
+  syncLogId: string             // RMSyncLog record ID
+}
+```
+
+**Logic:**
+1. Validates weekStartDate is Monday (throws BAD_REQUEST if not)
+2. Checks rate limit (max 2 syncs/minute, throws TOO_MANY_REQUESTS if exceeded)
+3. Checks for concurrent sync (throws error if already running)
+4. Fetches timesheet entries for the week (Monday-Sunday)
+5. Filters to entries with RM project mappings
+6. Calculates SHA-256 hash for each entry: `${date}_${projectId}_${hours}_${notes}`
+7. Compares hashes with RMSyncedEntry records to detect changes
+8. For each entry:
+   - **New:** Creates entry in RM via API
+   - **Changed:** Updates entry in RM via API
+   - **Unchanged:** Skips (no API call)
+9. Creates/updates RMSyncedEntry records with new hash
+10. Creates RMSyncLog record (status: COMPLETED/PARTIAL/FAILED)
+11. Returns sync result with statistics
+
+**Error Handling:**
+- Rate limit (429): Exponential backoff (2s, 4s, 8s), max 3 retries
+- Auth errors: Fail fast, no retry
+- Validation errors: Fail fast, no retry
+- Network errors: Retry once with 2s delay
+- Partial success supported (some succeed, some fail)
+
+**Example:**
+```typescript
+const result = await trpc.rm.sync.execute.mutate({
+  weekStartDate: '2025-11-11T00:00:00.000Z'  // Monday
+})
+
+// Response:
+// {
+//   success: true,
+//   entriesAttempted: 25,
+//   entriesSuccess: 23,
+//   entriesFailed: 2,
+//   entriesSkipped: 10,
+//   unmappedProjects: [{ id: 'proj-123', name: 'Unmapped Project' }],
+//   errors: [
+//     { entryId: 'entry-456', error: 'RM validation error: invalid hours' }
+//   ],
+//   syncLogId: 'log-789'
+// }
+```
+
+---
+
+### rm.sync.getStatus
+
+Get sync status for a specific week.
+
+**Type:** Query
+
+**Input:**
+```typescript
+{
+  weekStartDate: string  // ISO 8601 datetime
+}
+```
+
+**Output:**
+```typescript
+{
+  lastSyncAt: string    // ISO 8601 datetime of last sync
+  syncedCount: number   // Number of synced entries
+} | null                // null if no synced entries for this week
+```
+
+**Logic:**
+1. Fetches RMSyncedEntry records for the week
+2. Returns last sync time and count
+3. Returns null if no entries synced
+
+---
+
+### rm.sync.history
+
+Get recent sync history logs.
+
+**Type:** Query
+
+**Input:**
+```typescript
+{
+  limit?: number  // Max results (default: 10, max: 50)
+}
+```
+
+**Output:**
+```typescript
+Array<{
+  id: string
+  status: 'RUNNING' | 'COMPLETED' | 'PARTIAL' | 'FAILED'
+  entriesAttempted: number | null
+  entriesSuccess: number | null
+  entriesFailed: number | null
+  entriesSkipped: number | null
+  errorMessage: string | null
+  startedAt: string        // ISO 8601 datetime
+  completedAt: string | null  // ISO 8601 datetime
+}>
+```
+
+**Logic:**
+1. Fetches RMSyncLog records for user's connection
+2. Sorted by startedAt descending (newest first)
+3. Limited by input.limit
+
+---
+
 ## Error Codes
 
 All tRPC errors follow the standard error codes:
@@ -786,4 +929,4 @@ No breaking changes to existing API contracts.
 ---
 
 **Last Updated:** 2025-11-16
-**Status:** Phase 0 - Documentation Complete + Reset to Events feature documented
+**Status:** RM Integration Phase 3 Complete - Manual sync endpoints documented
