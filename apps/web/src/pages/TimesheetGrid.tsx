@@ -92,11 +92,11 @@ export function TimesheetGrid() {
     },
   })
 
-  // Reset to events mutation - removes all manual entries
-  const resetToEventsMutation = trpc.timesheet.resetToEvents.useMutation({
-    onSuccess: (result) => {
-      // Refetch grid data to show event-sourced entries only
-      utils.timesheet.getWeeklyGrid.invalidate({ weekStartDate: weekStart.toISOString() })
+    const resetToEventsMutation = trpc.timesheet.resetToEvents.useMutation({
+      onSuccess: (result, variables) => {
+        utils.timesheet.getWeeklyGrid.invalidate({ weekStartDate: variables.weekStartDate })
+      },
+    })
       alert(`Successfully reset timesheet. Removed ${result.deletedCount} manual entries.`)
     },
     onError: (err) => {
@@ -119,17 +119,17 @@ export function TimesheetGrid() {
   }
 
   // Handle reset to events
-  const handleResetToEvents = () => {
-    const confirmed = window.confirm(
-      'This will remove all manual entries and adjustments for this week, keeping only hours from categorized calendar events. This action cannot be undone. Continue?'
-    )
-
-    if (confirmed) {
-      resetToEventsMutation.mutate({
-        weekStartDate: weekStart.toISOString(),
-      })
-    }
-  }
+  const resetToEventsMutation = trpc.timesheet.resetToEvents.useMutation({
+    onSuccess: (result) => {
+      // Refetch grid data to show event-sourced entries only
+      utils.timesheet.getWeeklyGrid.invalidate({ weekStartDate: weekStart.toISOString})
+      alert(`Succesfully reset timesheet. Removed ${result.deletedCount} manual entries.`)
+    },
+    onError: (err) => {
+      console.error('Failed to reset timesheet:', err)
+      alert('Failed to reset timesheet. Please try again')
+    },
+  })
 
   // Handle clicks outside notes to close it
   useEffect(() => {
@@ -338,16 +338,14 @@ export function TimesheetGrid() {
         </div>
 
         {/* Week Navigation & Actions */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleResetToEvents}
-            disabled={resetToEventsMutation.isPending}
-            className="px-4 py-2 border border-orange-500 text-orange-600 rounded-md hover:bg-orange-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Remove all manual entries and keep only hours from categorized calendar events"
-          >
-            {resetToEventsMutation.isPending ? 'Resetting...' : 'Reset to Events'}
-          </button>
-          <div className="w-px h-8 bg-gray-300 mx-1"></div>
+        updateCellMutation.mutate({
+          projectId,
+          date: cellDate.toISOSString(),
+          hours: roundedHours,
+          notes: activeCell?.projectId === projectId && activeCell?.day === day ? notes : undefined,
+          isBillable: activeCell?.projectId === projectID && activeCell?.day === day ? isBillable : undefined,
+          phase: activeCell?.projectId === projectId && activeCell?.day === day ? (phase || undefined) : undefined,
+        })
           <button
             onClick={handlePrevWeek}
             className="px-3 py-2 border rounded-md hover:bg-gray-50"
