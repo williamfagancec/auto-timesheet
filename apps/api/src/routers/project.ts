@@ -98,8 +98,9 @@ export const projectRouter = router({
       // Add hours30Days to each project
       const projectsWithHours = projects.map((project) => {
         const totalMinutes = hoursByProject.get(project.id) || 0
-        // Convert minutes to hours (round to 2 decimal places)
-        const hours30Days = Math.round((totalMinutes / 60) * 100) / 100
+        // Round to nearest 15 minutes, then convert to hours (0.25, 0.5, 0.75, etc.)
+        const roundedMinutes = Math.round(totalMinutes / 15) * 15
+        const hours30Days = roundedMinutes / 60
         return {
           ...project,
           hours30Days,

@@ -409,6 +409,48 @@ pnpm db:seed          # Seed AI test data
 - `apps/api/src/routers/__tests__/timesheet-reset.test.ts` - Test suite (NEW)
 - `docs/API.md` - API documentation updated
 
+### 🔐 Session Management & Token Refresh - Complete (2025-11-22)
+
+**Status:** Fully implemented with session timeout, proactive token refresh, and automated cleanup.
+
+**Session Timeout:**
+- Configured 30-day session expiration in Lucia Auth (`apps/api/src/auth/lucia.ts:12`)
+- Sessions automatically expire after 30 days of inactivity
+- Lucia extends sessions in the second half of their lifetime (15 days)
+- Users will be logged out when session expires, forcing token refresh on next login
+
+**Proactive Token Refresh:**
+- Added token refresh on every authenticated request (`apps/api/src/context.ts:43-60`)
+- When user accesses app with valid session, Google OAuth tokens are automatically refreshed if expired
+- Runs in background - doesn't block requests if refresh fails
+- Ensures calendar events always sync with fresh tokens
+- Silently handles users without calendar connections (no error spam)
+
+**Automatic Cleanup:**
+- Created session cleanup background job (`apps/api/src/jobs/session-cleanup-job.ts`)
+- Runs every 6 hours via BullMQ to delete expired sessions from database
+- Prevents database bloat from abandoned sessions
+- Integrated with server startup and graceful shutdown
+
+**User Experience:**
+- Users no longer remain logged in indefinitely
+- Sessions timeout after 30 days, requiring re-authentication
+- Token refresh happens automatically when user opens app
+- Calendar sync triggered immediately after login (already existed)
+- No manual token refresh needed - completely transparent to user
+
+**Technical Implementation:**
+- Uses Lucia v3 `TimeSpan` API for session expiration
+- Token refresh uses existing `getValidAccessToken()` function
+- Session cleanup uses BullMQ repeatable jobs (cron pattern: `0 */6 * * *`)
+- Graceful error handling - token refresh failures don't break user flow
+
+**Files Modified:**
+- `apps/api/src/auth/lucia.ts` - Added 30-day session timeout
+- `apps/api/src/context.ts` - Added proactive token refresh on session validation
+- `apps/api/src/jobs/session-cleanup-job.ts` - Session cleanup background job (NEW)
+- `apps/api/src/index.ts` - Integrated session cleanup job into server lifecycle
+
 ---
 
 ### 🚧 Partially Implemented
@@ -419,7 +461,7 @@ pnpm db:seed          # Seed AI test data
 
 ### ❌ Not Started
 
-**Backend:** Session cleanup jobs, structured logging (using console.log), token refresh race condition handling
+**Backend:** Structured logging (using console.log), token refresh race condition handling
 
 **Frontend:** Settings page, manual time entry UI
 
@@ -469,7 +511,6 @@ pnpm db:seed          # Seed AI test data
 - Password strength: only checks min length
 - Token refresh: potential race condition
 - Logging: console.log instead of structured logger
-- Sessions: no automated cleanup
 - Transactions: user/session creation not atomic
 
 ### Key Files Reference

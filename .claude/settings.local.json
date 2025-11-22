@@ -40,7 +40,8 @@
       "Bash(timeout 10 pnpm dev:api:*)",
       "Bash(lsof:*)",
       "Bash(kill:*)",
-      "Bash(ps:*)"
+      "Bash(ps:*)",
+      "Bash(npx vite build)"
     ],
     "deny": [],
     "ask": []
