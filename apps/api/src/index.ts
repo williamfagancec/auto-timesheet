@@ -264,8 +264,10 @@ try {
 
   // Initialize background jobs
   if (process.env.NODE_ENV !== 'test') {
-    await initializeCalendarSyncJobs()
-    await initializeSessionCleanupJobs()
+    await Promise.all([
+      initializeCalendarSyncJobs(),
+      initializeSessionCleanupJobs(),
+    ])
     console.log('Background jobs initialized')
   }
 } catch (err) {
@@ -281,8 +283,10 @@ signals.forEach((signal) => {
 
     try {
       // Shutdown background jobs
-      await shutdownCalendarSyncJobs()
-      await shutdownSessionCleanupJobs()
+      await Promise.all([
+        shutdownCalendarSyncJobs(),
+        shutdownSessionCleanupJobs(),
+      ])
 
       // Close server
       await server.close()

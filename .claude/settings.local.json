@@ -41,7 +41,11 @@
       "Bash(lsof:*)",
       "Bash(kill:*)",
       "Bash(ps:*)",
-      "Bash(npx vite build)"
+      "Bash(npx vite build)",
+      "Bash(awk:*)",
+      "Bash(xxd:*)",
+      "Bash(tr:*)",
+      "Bash(fold:*)"
     ],
     "deny": [],
     "ask": []

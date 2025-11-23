@@ -177,7 +177,7 @@ export function TimesheetGrid() {
         invalidateTimerRef.current = null
       }, 500)
     }
-  }, [weekStart, updateCellMutation, activeCell, notes, isBillable, phase, utils, triggerRender])
+  }, [weekStart, updateCellMutation, activeCell, notes, isBillable, phase, utils, triggerRender]);
 
   // Start sync coordinator on mount
   useEffect(() => {
