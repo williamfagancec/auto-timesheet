@@ -6,6 +6,7 @@ import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify'
 import { appRouter } from './routers/index.js'
 import { createContext } from './context.js'
 import { initializeCalendarSyncJobs, shutdownCalendarSyncJobs } from './jobs/calendar-sync-job.js'
+import { initializeSessionCleanupJobs, shutdownSessionCleanupJobs } from './jobs/session-cleanup-job.js'
 import { getOAuthState } from './auth/oauth-state-store.js'
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001
@@ -264,6 +265,7 @@ try {
   // Initialize background jobs
   if (process.env.NODE_ENV !== 'test') {
     await initializeCalendarSyncJobs()
+    await initializeSessionCleanupJobs()
     console.log('Background jobs initialized')
   }
 } catch (err) {
@@ -280,6 +282,7 @@ signals.forEach((signal) => {
     try {
       // Shutdown background jobs
       await shutdownCalendarSyncJobs()
+      await shutdownSessionCleanupJobs()
 
       // Close server
       await server.close()

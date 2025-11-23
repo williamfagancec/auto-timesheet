@@ -45,7 +45,7 @@ openssl rand -hex 32
 2. Click **"New Project"**
 3. Select **"Deploy from GitHub repo"**
 4. Authorize Railway to access your GitHub (if not already done)
-5. Select `time-tracker` repository
+5. Select `auto-timesheet` repository
 6. Click **"Deploy Now"**
 
 ### Step 2: Configure Service Settings
@@ -135,7 +135,7 @@ If `database` or `redis` shows "error", check your DATABASE_URL and REDIS_URL va
 
 1. Go to https://vercel.com/dashboard
 2. Click **"Add New..."** → **"Project"**
-3. Click **"Import"** next to your `time-tracker` repository
+3. Click **"Import"** next to your `auto-timesheet` repository
 4. If not visible, click **"Adjust GitHub App Permissions"**
 
 ### Step 2: Configure Project Settings

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { format, startOfWeek, endOfWeek, addWeeks, subWeeks } from 'date-fns'
 import { trpc } from '../lib/trpc'
 
@@ -19,6 +19,14 @@ interface ActiveCell {
   day: DayKey
 }
 
+// Pending change entry - stored in ref, survives React re-renders
+interface PendingChange {
+  value: string // Raw string input from user
+  parsedHours: number | null // Validated hours (null if invalid)
+  status: 'dirty' | 'queued' | 'saving' | 'synced' | 'error'
+  timestamp: number
+}
+
 // Helper to format hours to display .25, .5, .75 instead of .3, .8
 const formatHours = (hours: number): string => {
   if (hours === 0) return ''
@@ -33,6 +41,16 @@ const formatHours = (hours: number): string => {
   return rounded.toString()
 }
 
+// Parse and validate hours input
+const parseHoursInput = (value: string): number | null => {
+  if (!value || value.trim() === '') return 0
+  const hours = parseFloat(value)
+  if (isNaN(hours)) return null
+  // Round to nearest 0.25 and clamp to 0-24
+  const rounded = Math.round(hours * 4) / 4
+  return Math.max(0, Math.min(24, rounded))
+}
+
 export function TimesheetGrid() {
   // Default to current week (Monday start)
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }))
@@ -44,11 +62,14 @@ export function TimesheetGrid() {
   const [isBillable, setIsBillable] = useState<boolean>(true)
   const [phase, setPhase] = useState<string>('')
 
-  // Pending input value (for validation on blur/enter)
-  const [pendingValue, setPendingValue] = useState<{ [key: string]: string }>({})
+  // ========== REF-BASED PENDING CHANGES STORE (survives React re-renders) ==========
+  const pendingChangesRef = useRef<Map<string, PendingChange>>(new Map())
+  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const invalidateTimerRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Track which cells are currently being edited to prevent display flicker during save
-  const [editingCells, setEditingCells] = useState<Set<string>>(new Set())
+  // Force re-render trigger (only for UI updates, not data storage)
+  const [renderTrigger, setRenderTrigger] = useState(0)
+  const triggerRender = useCallback(() => setRenderTrigger((n) => n + 1), [])
 
   // Ref for notes container to handle clicks outside
   const notesRef = useRef<HTMLDivElement>(null)
@@ -57,15 +78,6 @@ export function TimesheetGrid() {
   const { data: gridData, isLoading } = trpc.timesheet.getWeeklyGrid.useQuery({
     weekStartDate: weekStart.toISOString(),
   })
-
-  // Clear editing state when fresh data arrives from server
-  useEffect(() => {
-    if (gridData && !isLoading) {
-      // Clear all editing states and pending values when new data is loaded
-      setEditingCells(new Set())
-      setPendingValue({})
-    }
-  }, [gridData, isLoading])
 
   // Fetch user defaults for billable and phase
   const { data: userDefaults } = trpc.project.getDefaults.useQuery(undefined, {
@@ -76,21 +88,127 @@ export function TimesheetGrid() {
   // Get utils for cache manipulation
   const utils = trpc.useUtils()
 
-  // Update cell mutation - simplified without complex optimistic updates
-  // The API handles aggregation of multiple entries per day, so we can't
-  // accurately predict the final value client-side
+  // Update cell mutation - simple, no complex state management
   const updateCellMutation = trpc.timesheet.updateCell.useMutation({
-    onSuccess: () => {
-      // Refetch grid data to get accurate aggregated values from server
-      utils.timesheet.getWeeklyGrid.invalidate({ weekStartDate: weekStart.toISOString() })
+    onSuccess: (_data, variables) => {
+      const dayName = format(new Date(variables.date), 'EEE').toLowerCase()
+      const key = `${variables.projectId}-${dayName}`
+
+      // Mark as synced and schedule cleanup
+      const change = pendingChangesRef.current.get(key)
+      if (change && change.status === 'saving') {
+        change.status = 'synced'
+        // Remove synced entries after a short delay
+        setTimeout(() => {
+          const current = pendingChangesRef.current.get(key)
+          if (current?.status === 'synced') {
+            pendingChangesRef.current.delete(key)
+            triggerRender()
+          }
+        }, 100)
+      }
+      triggerRender()
     },
-    onError: (err) => {
-      console.error('Failed to update timesheet cell:', err)
-      alert('Failed to update timesheet. Please try again.')
-      // Clear editing state on error
-      setEditingCells(new Set())
+    onError: (err, variables) => {
+      const dayName = format(new Date(variables.date), 'EEE').toLowerCase()
+      const key = `${variables.projectId}-${dayName}`
+      console.error(`Failed to save ${key}:`, err)
+
+      // Mark as error but keep the value so user can retry
+      const change = pendingChangesRef.current.get(key)
+      if (change) {
+        change.status = 'error'
+      }
+      triggerRender()
     },
   })
+
+  // ========== SYNC COORDINATOR ==========
+  const processPendingChanges = useCallback(() => {
+    let hasChangesToSync = false
+    let hasSavingChanges = false
+
+    // Find all queued changes and send them
+    pendingChangesRef.current.forEach((change, key) => {
+      if (change.status === 'queued' && change.parsedHours !== null) {
+        hasChangesToSync = true
+        change.status = 'saving'
+
+        const [projectId, dayKey] = key.split('-') as [string, DayKey]
+        const dayIndex = DAY_NAMES.findIndex((d) => d.key === dayKey)
+        const cellDate = new Date(weekStart)
+        cellDate.setDate(cellDate.getDate() + dayIndex)
+
+        updateCellMutation.mutate({
+          projectId,
+          date: cellDate.toISOString(),
+          hours: change.parsedHours,
+          notes: activeCell?.projectId === projectId && activeCell?.day === dayKey ? notes : undefined,
+          isBillable: activeCell?.projectId === projectId && activeCell?.day === dayKey ? isBillable : undefined,
+          phase: activeCell?.projectId === projectId && activeCell?.day === dayKey ? (phase || undefined) : undefined,
+        })
+      }
+      if (change.status === 'saving') {
+        hasSavingChanges = true
+      }
+    })
+
+    if (hasChangesToSync) {
+      triggerRender()
+    }
+
+    // Schedule cache invalidation after all saves complete
+    if (!hasSavingChanges && !hasChangesToSync) {
+      // All saves completed, invalidate cache
+      if (invalidateTimerRef.current) {
+        clearTimeout(invalidateTimerRef.current)
+      }
+      invalidateTimerRef.current = setTimeout(() => {
+        // Only invalidate if no pending changes
+        let hasPending = false
+        pendingChangesRef.current.forEach((change) => {
+          if (change.status !== 'synced' && change.status !== 'error') {
+            hasPending = true
+          }
+        })
+        if (!hasPending) {
+          utils.timesheet.getWeeklyGrid.invalidate({ weekStartDate: weekStart.toISOString() })
+        }
+        invalidateTimerRef.current = null
+      }, 500)
+    }
+  }, [weekStart, updateCellMutation, activeCell, notes, isBillable, phase, utils, triggerRender])
+
+  // Start sync coordinator on mount
+  useEffect(() => {
+    syncIntervalRef.current = setInterval(() => {
+      processPendingChanges()
+    }, 100) // Check every 100ms for changes to sync
+
+    return () => {
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current)
+      }
+      if (invalidateTimerRef.current) {
+        clearTimeout(invalidateTimerRef.current)
+      }
+    }
+  }, [processPendingChanges])
+
+  // ========== HELPER TO CHECK PENDING STATE ==========
+  const getPendingChange = useCallback((key: string): PendingChange | undefined => {
+    return pendingChangesRef.current.get(key)
+  }, [])
+
+  const hasPendingSaves = useCallback(() => {
+    let pending = false
+    pendingChangesRef.current.forEach((change) => {
+      if (change.status === 'dirty' || change.status === 'queued' || change.status === 'saving') {
+        pending = true
+      }
+    })
+    return pending
+  }, [])
 
   // Navigate weeks
   const handlePrevWeek = () => {
@@ -140,110 +258,75 @@ export function TimesheetGrid() {
     setPhase(userDefaults?.phase ?? '')
   }
 
-  // Handle input change (just update local state, don't save yet)
-  const handleInputChange = (projectId: string, day: DayKey, value: string) => {
-    const key = `${projectId}-${day}`
-    setPendingValue((prev) => ({ ...prev, [key]: value }))
-
-    // Mark this cell as being edited
-    setEditingCells((prev) => new Set(prev).add(key))
-  }
-
-  // Handle input focus - mark as editing
-  const handleInputFocus = (projectId: string, day: DayKey) => {
-    const key = `${projectId}-${day}`
-    setEditingCells((prev) => new Set(prev).add(key))
-  }
-
-  // Handle blur or enter key (validate and save)
-  const handleInputBlur = (projectId: string, day: DayKey, value: string) => {
+  // Handle input change - write directly to ref store (never lost)
+  const handleInputChange = useCallback((projectId: string, day: DayKey, value: string) => {
     const key = `${projectId}-${day}`
 
-    if (!value || value.trim() === '') {
-      // Empty value - send 0 hours to delete manual entries
-      const dayIndex = DAY_NAMES.findIndex((d) => d.key === day)
-      const cellDate = new Date(weekStart)
-      cellDate.setDate(cellDate.getDate() + dayIndex)
+    // Parse the value immediately for validation feedback
+    const parsedHours = parseHoursInput(value)
 
-      // Update cell on server with 0 hours
-      updateCellMutation.mutate({
-        projectId,
-        date: cellDate.toISOString(),
-        hours: 0,
-        notes: activeCell?.projectId === projectId && activeCell?.day === day ? notes : undefined,
-        isBillable: activeCell?.projectId === projectId && activeCell?.day === day ? isBillable : undefined,
-        phase: activeCell?.projectId === projectId && activeCell?.day === day ? (phase || undefined) : undefined,
-      })
-
-      // Keep cell in editing state until server responds
-      return
-    }
-
-    // Parse hours (allow decimal values in 0.25 increments)
-    const hours = parseFloat(value)
-
-    if (isNaN(hours)) {
-      alert('Please enter a valid number')
-      // Clear editing state and pending value
-      setPendingValue((prev) => {
-        const newState = { ...prev }
-        delete newState[key]
-        return newState
-      })
-      setEditingCells((prev) => {
-        const newSet = new Set(prev)
-        newSet.delete(key)
-        return newSet
-      })
-      return
-    }
-
-    // Round to nearest 0.25 (15 minutes)
-    const roundedHours = Math.round(hours * 4) / 4
-
-    // Validate range (0-24 hours)
-    if (roundedHours < 0 || roundedHours > 24) {
-      alert('Hours must be between 0 and 24')
-      // Clear editing state and pending value
-      setPendingValue((prev) => {
-        const newState = { ...prev }
-        delete newState[key]
-        return newState
-      })
-      setEditingCells((prev) => {
-        const newSet = new Set(prev)
-        newSet.delete(key)
-        return newSet
-      })
-      return
-    }
-
-    // Calculate the date for this day
-    const dayIndex = DAY_NAMES.findIndex((d) => d.key === day)
-    const cellDate = new Date(weekStart)
-    cellDate.setDate(cellDate.getDate() + dayIndex)
-
-    // Update pending value to show rounded value immediately
-    setPendingValue((prev) => ({ ...prev, [key]: formatHours(roundedHours) }))
-
-    // Update cell on server (editing state will be cleared when data refetches)
-    updateCellMutation.mutate({
-      projectId,
-      date: cellDate.toISOString(),
-      hours: roundedHours,
-      notes: activeCell?.projectId === projectId && activeCell?.day === day ? notes : undefined,
-      isBillable: activeCell?.projectId === projectId && activeCell?.day === day ? isBillable : undefined,
-      phase: activeCell?.projectId === projectId && activeCell?.day === day ? (phase || undefined) : undefined,
+    // Write to ref store - this survives any React re-render
+    pendingChangesRef.current.set(key, {
+      value,
+      parsedHours,
+      status: 'dirty', // Mark as dirty, not yet queued for sync
+      timestamp: Date.now(),
     })
-  }
+
+    // Trigger render to show the new value
+    triggerRender()
+  }, [triggerRender])
+
+  // Handle input focus - no special handling needed with ref store
+  const handleInputFocus = useCallback((_projectId: string, _day: DayKey) => {
+    // Nothing to do - the pending store already has the value if any
+  }, [])
+
+  // Handle blur - mark as ready to sync
+  const handleInputBlur = useCallback((projectId: string, day: DayKey, _value: string) => {
+    const key = `${projectId}-${day}`
+    const change = pendingChangesRef.current.get(key)
+
+    if (change && change.status === 'dirty') {
+      // Validate before queueing
+      if (change.parsedHours !== null) {
+        // Valid input - queue for sync
+        change.status = 'queued'
+        // Update display value to show rounded version
+        change.value = formatHours(change.parsedHours)
+      } else {
+        // Invalid input - remove from pending and show error
+        pendingChangesRef.current.delete(key)
+      }
+      triggerRender()
+    }
+  }, [triggerRender])
 
   // Handle enter key
-  const handleKeyDown = (e: React.KeyboardEvent, projectId: string, day: DayKey, value: string) => {
+  const handleKeyDown = useCallback((e: React.KeyboardEvent, projectId: string, day: DayKey) => {
     if (e.key === 'Enter') {
-      handleInputBlur(projectId, day, value)
+      const key = `${projectId}-${day}`
+      const change = pendingChangesRef.current.get(key)
+
+      if (change && change.status === 'dirty' && change.parsedHours !== null) {
+        change.status = 'queued'
+        change.value = formatHours(change.parsedHours)
+        triggerRender()
+      }
       ;(e.target as HTMLInputElement).blur()
+    } else if (e.key === 'Tab') {
+      // On tab, mark current cell as queued before moving to next
+      const key = `${projectId}-${day}`
+      const change = pendingChangesRef.current.get(key)
+
+      if (change && change.status === 'dirty' && change.parsedHours !== null) {
+        change.status = 'queued'
+        change.value = formatHours(change.parsedHours)
+        triggerRender()
+      }
+      // Don't prevent default - let tab move to next cell naturally
     }
-  }
+  }, [triggerRender])
 
   // Handle notes save
   const handleNotesSave = () => {
@@ -312,26 +395,35 @@ export function TimesheetGrid() {
         </div>
 
         {/* Week Navigation & Actions */}
-        <div className="flex gap-2">
-          <button
-            onClick={handlePrevWeek}
-            className="px-3 py-2 border rounded-md hover:bg-gray-50"
-          >
-            ← Prev
-          </button>
-          <button
-            onClick={handleThisWeek}
-            disabled={isThisWeek}
-            className="px-4 py-2 border rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            This Week
-          </button>
-          <button
-            onClick={handleNextWeek}
-            className="px-3 py-2 border rounded-md hover:bg-gray-50"
-          >
-            Next →
-          </button>
+        <div className="flex items-center gap-3">
+          {/* Global save indicator */}
+          {hasPendingSaves() && (
+            <div className="flex items-center gap-2 text-sm text-blue-600">
+              <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse" />
+              <span>Saving...</span>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={handlePrevWeek}
+              className="px-3 py-2 border rounded-md hover:bg-gray-50"
+            >
+              ← Prev
+            </button>
+            <button
+              onClick={handleThisWeek}
+              disabled={isThisWeek}
+              className="px-4 py-2 border rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              This Week
+            </button>
+            <button
+              onClick={handleNextWeek}
+              className="px-3 py-2 border rounded-md hover:bg-gray-50"
+            >
+              Next →
+            </button>
+          </div>
         </div>
       </div>
 
@@ -383,28 +475,41 @@ export function TimesheetGrid() {
                   <div className="font-medium text-gray-900">{project.name}</div>
                 </td>
                 {DAY_NAMES.map((day) => {
-                  const hours = project.dailyHours[day.key]
+                  const serverHours = project.dailyHours[day.key]
                   const eventHrs = project.eventHours[day.key] || 0
                   const manualHrs = project.manualHours[day.key] || 0
                   const isActive = activeCell?.projectId === project.id && activeCell?.day === day.key
                   const key = `${project.id}-${day.key}`
-                  const isEditing = editingCells.has(key)
+
+                  // Check pending changes store (ref-based, survives re-renders)
+                  const pendingChange = getPendingChange(key)
+                  const hasPending = pendingChange !== undefined
+                  const isSaving = pendingChange?.status === 'saving'
+                  const isQueued = pendingChange?.status === 'queued'
+                  const isDirty = pendingChange?.status === 'dirty'
+                  const hasError = pendingChange?.status === 'error'
+
+                  // Use pending value if available, otherwise server value
+                  const hours = hasPending && pendingChange.parsedHours !== null
+                    ? pendingChange.parsedHours
+                    : serverHours
 
                   // Determine cell type for visual styling
                   const hasEvents = eventHrs > 0
-                  const hasManual = manualHrs > 0
+                  const hasManual = manualHrs > 0 || (hasPending && pendingChange.parsedHours !== null && pendingChange.parsedHours > 0)
                   const cellType = hasEvents && hasManual ? 'mixed' : hasEvents ? 'event' : hasManual ? 'manual' : 'empty'
 
                   // Display logic:
-                  // 1. If cell is being edited AND has pending value, show pending value
+                  // 1. If cell has pending change, show pending value (raw string for dirty, formatted for queued/saving)
                   // 2. Otherwise, show formatted hours from server
-                  const displayValue = (isEditing && pendingValue[key] !== undefined)
-                    ? pendingValue[key]
-                    : formatHours(hours)
+                  const displayValue = hasPending
+                    ? pendingChange.value
+                    : formatHours(serverHours)
 
-                  // Build tooltip showing breakdown
+                  // Build tooltip showing breakdown and status
+                  const statusText = isSaving ? ' | Saving...' : isQueued ? ' | Queued' : isDirty ? ' | Unsaved' : hasError ? ' | Error!' : ''
                   const tooltipText = hours > 0
-                    ? `Total: ${formatHours(hours)}h${eventHrs > 0 ? ` | Events: ${formatHours(eventHrs)}h` : ''}${manualHrs > 0 ? ` | Manual: ${formatHours(manualHrs)}h` : ''}`
+                    ? `Total: ${formatHours(hours)}h${eventHrs > 0 ? ` | Events: ${formatHours(eventHrs)}h` : ''}${manualHrs > 0 ? ` | Manual: ${formatHours(manualHrs)}h` : ''}${statusText}`
                     : 'Click to add hours'
 
                   return (
@@ -417,6 +522,10 @@ export function TimesheetGrid() {
                         'bg-gray-50'
                       } ${
                         isActive ? 'ring-2 ring-blue-500 ring-inset' : ''
+                      } ${
+                        isSaving ? 'opacity-75' : ''
+                      } ${
+                        hasError ? 'bg-red-50' : ''
                       }`}
                       onClick={() => handleCellClick(project.id, day.key)}
                       title={tooltipText}
@@ -433,13 +542,24 @@ export function TimesheetGrid() {
                           e.target.select()
                           handleInputFocus(project.id, day.key)
                         }}
-                        onKeyDown={(e) => handleKeyDown(e, project.id, day.key, e.currentTarget.value)}
+                        onKeyDown={(e) => handleKeyDown(e, project.id, day.key)}
                         onClick={(e) => e.stopPropagation()}
                         className={`w-full text-center bg-transparent outline-none ${
                           hours > 0 ? 'font-medium text-gray-900' : 'text-gray-400'
+                        } ${
+                          hasError ? 'text-red-600' : ''
                         } [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
                         placeholder="0.0"
                       />
+                      {(isSaving || isQueued) && (
+                        <div className="absolute top-0 right-0 w-2 h-2 bg-blue-500 rounded-full animate-pulse" title={isSaving ? 'Saving...' : 'Queued'} />
+                      )}
+                      {isDirty && (
+                        <div className="absolute top-0 right-0 w-2 h-2 bg-yellow-500 rounded-full" title="Unsaved" />
+                      )}
+                      {hasError && (
+                        <div className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full" title="Error - will retry" />
+                      )}
                     </td>
                   )
                 })}
