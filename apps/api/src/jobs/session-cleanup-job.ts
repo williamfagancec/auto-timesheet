@@ -1,4 +1,5 @@
 import { Queue, Worker } from 'bullmq'
+import { error } from 'console'
 import { prisma } from 'database'
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
@@ -114,14 +115,18 @@ export async function setupRecurringSessionCleanup() {
 export async function initializeSessionCleanupJobs() {
   console.log('[SessionCleanupJob] Initializing session cleanup jobs')
 
+ try {
   // Setup recurring cleanup
   await setupRecurringSessionCleanup()
-
   // Run initial cleanup
   await sessionCleanupQueue.add('cleanup-expired-sessions', {})
-
-  console.log('[SessionCleanupJob] Session cleanup jobs initialized')
+  console.log('[sessionCleanupJob] Session cleanup jobs initialised') 
+ } catch error {
+  console.error('[SessionCleanupJob] Failed to initalise:', error)
+  throw error
+ }
 }
+
 
 /**
  * Graceful shutdown

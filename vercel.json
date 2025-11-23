@@ -36,11 +36,11 @@
         },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'selfl script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-serc 'self' https://your-api-domain.railway.app"
+          "value": "default-src 'self; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' https://your-api-domain.railway.app"
         },
         {
           "key": "Permissions-Policy",
-          "value": "camera=(), microphone=(), geo location=()"
+          "value": "camera=(), microphone=(), geolocation=()"
         }
       ]
     }
