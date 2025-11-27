@@ -120,8 +120,8 @@ export async function initializeSessionCleanupJobs() {
   await setupRecurringSessionCleanup()
   // Run initial cleanup
   await sessionCleanupQueue.add('cleanup-expired-sessions', {})
-  console.log('[sessionCleanupJob] Session cleanup jobs initialised') 
- } catch error {
+  console.log('[sessionCleanupJob] Session cleanup jobs initialised')
+ } catch (error) {
   console.error('[SessionCleanupJob] Failed to initalise:', error)
   throw error
  }

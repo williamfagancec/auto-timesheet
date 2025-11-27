@@ -8,7 +8,7 @@ import { hashPassword, verifyPassword } from '../auth/password.js'
 import { google, GOOGLE_SCOPES } from '../auth/google.js'
 import { encrypt } from '../auth/encryption.js'
 import { generateCodeVerifier, generateState } from 'arctic'
-import { storeOAuthState } from '../auth/oauth-state-store.js'
+import { storeOAuthState, getOAuthState } from '../auth/oauth-state-store.js'
 import { getUserTimezone } from '../services/google-calendar.js'
 import { syncUserEvents } from '../services/calendar-sync.js'
 
@@ -145,16 +145,20 @@ export const authRouter = router({
       })
 
       if (calendarConnection) {
-        console.log(`Triggering automatic calendar sync for user ${user.email} after login`)
-        syncUserEvents(user.id)
-          .then((result) => {
-            console.log(`Auto-sync completed for ${user.email}: ${result.eventsCreated} created, ${result.eventsUpdated} updated`)
-          })
-          .catch((error) => {
-            console.error(`Auto-sync failed for ${user.email}:`, error)
-            // Don't fail the login flow - sync can be retried manually
-            // Error may occur if no calendars are selected, which is handled gracefully
-          })
+        console.log(`Scheduling automatic calendar sync for user ${user.email} after login (2 second delay)`)
+        // Delay sync by 2 seconds to ensure login response completes first
+        // This prevents race conditions with proactive token refresh in context.ts
+        setTimeout(() => {
+          syncUserEvents(user.id)
+            .then((result) => {
+              console.log(`Auto-sync completed for ${user.email}: ${result.eventsCreated} created, ${result.eventsUpdated} updated`)
+            })
+            .catch((error) => {
+              console.error(`Auto-sync failed for ${user.email}:`, error)
+              // Don't fail the login flow - sync can be retried manually
+              // Error may occur if no calendars are selected, which is handled gracefully
+            })
+        }, 2000)
       }
 
       return {
@@ -210,28 +214,26 @@ export const authRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      // Verify state
-      const storedState = ctx.req.cookies.google_oauth_state
-      const storedCodeVerifier = ctx.req.cookies.google_code_verifier
+      // Verify state and retrieve code verifier from in-memory store
+      const stored = getOAuthState(input.state)
 
-     if (process.env.DEBUG_OAUTH === 'true') {
-      console.log('[OAuth Debug] Cookies received:', {
-        storedState,
-        storedCodeVerifier,
-        inputState: input.state,
-      })
-     }
+      if (process.env.DEBUG_OAUTH === 'true') {
+        console.log('[OAuth Debug] State lookup:', {
+          inputState: input.state,
+          found: !!stored,
+        })
+      }
 
-      if (!storedState || !storedCodeVerifier || storedState !== input.state) {
+      if (!stored) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: 'Invalid OAuth state',
+          message: 'Invalid or expired OAuth state. Please try logging in again.',
         })
       }
 
       try {
-        // Exchange code for tokens
-        const tokens = await google.validateAuthorizationCode(input.code, storedCodeVerifier)
+        // Exchange code for tokens using the code verifier from in-memory store
+        const tokens = await google.validateAuthorizationCode(input.code, stored.codeVerifier)
 
         // Fetch user info from Google
         const googleUserResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
@@ -383,25 +385,25 @@ export const authRouter = router({
         const sessionCookie = lucia.createSessionCookie(session.id)
         ctx.res.setCookie(sessionCookie.name, sessionCookie.value, sessionCookie.attributes)
 
-        // Clear OAuth cookies
-        ctx.res.clearCookie('google_oauth_state')
-        ctx.res.clearCookie('google_code_verifier')
-
         console.log(`Successfully authenticated user ${user.email} via Google OAuth`)
 
-        // Trigger automatic calendar sync immediately after successful authentication
+        // Trigger automatic calendar sync after successful authentication
         // This ensures fresh tokens are used and all calendar events are synced
         // Run this in background - don't block OAuth flow if sync fails
-        console.log(`Triggering automatic calendar sync for user ${user.email}`)
-        syncUserEvents(user.id)
-          .then((result) => {
-            console.log(`Auto-sync completed for ${user.email}: ${result.eventsCreated} created, ${result.eventsUpdated} updated`)
-          })
-          .catch((error) => {
-            console.error(`Auto-sync failed for ${user.email}:`, error)
-            // Don't fail the OAuth flow - sync can be retried manually
-            // Error may occur if no calendars are selected, which is handled gracefully
-          })
+        console.log(`Scheduling automatic calendar sync for user ${user.email} after OAuth (2 second delay)`)
+        // Delay sync by 2 seconds to ensure OAuth response completes first
+        // This prevents race conditions with proactive token refresh in context.ts
+        setTimeout(() => {
+          syncUserEvents(user.id)
+            .then((result) => {
+              console.log(`Auto-sync completed for ${user.email}: ${result.eventsCreated} created, ${result.eventsUpdated} updated`)
+            })
+            .catch((error) => {
+              console.error(`Auto-sync failed for ${user.email}:`, error)
+              // Don't fail the OAuth flow - sync can be retried manually
+              // Error may occur if no calendars are selected, which is handled gracefully
+            })
+        }, 2000)
 
         return {
           success: true,

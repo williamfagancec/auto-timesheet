@@ -236,8 +236,20 @@ try {
   // Validate database connection before starting
   console.log('[Startup] Validating database connection...')
   const { prisma } = await import('database')
-  await prisma.$queryRaw`SELECT 1`
-  console.log('[Startup] Database connection validated')
+  try {
+    await prisma.$queryRaw`SELECT 1`
+    console.log('[Startup] Database connection validated')
+  } catch (dbError) {
+    console.error('[Startup] Database connection failed:', dbError)
+    // In production, fail fast if database is not available
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[Startup] Database is required in production. Exiting...')
+      process.exit(1)
+    } else {
+      console.warn('[Startup] Continuing without database validation (development mode)')
+      console.warn('[Startup] Warning: Database operations will fail until connection is restored')
+    }
+  }
 
   // Validate Redis connection before starting (in production)
   if (process.env.NODE_ENV === 'production' || process.env.REDIS_URL) {

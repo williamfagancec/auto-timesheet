@@ -45,7 +45,10 @@
       "Bash(awk:*)",
       "Bash(xxd:*)",
       "Bash(tr:*)",
-      "Bash(fold:*)"
+      "Bash(fold:*)",
+      "Bash(/dev/null)",
+      "Bash(xargs kill:*)",
+      "Bash(psql:*)"
     ],
     "deny": [],
     "ask": []

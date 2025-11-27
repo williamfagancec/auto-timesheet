@@ -1,7 +1,8 @@
 import { CreateFastifyContextOptions } from '@trpc/server/adapters/fastify'
 import { lucia } from './auth/lucia'
 import type { User, Session } from 'lucia'
-import { getValidAccessToken } from './auth/token-refresh'
+import { getValidAccessToken, isTokenExpired } from './auth/token-refresh'
+import { prisma } from 'database'
 
 // Track in-flight token refresh operations to prevent concurrent refreshes for the same user
 const tokenRefreshPromises = new Map<string, Promise<void>>()
@@ -56,15 +57,37 @@ export async function createContext({ req, res }: CreateFastifyContextOptions) {
         // No refresh in progress - create a new one
         refreshPromise = (async () => {
           try {
+            // Check if token actually needs refresh before attempting
+            // This prevents unnecessary refresh immediately after OAuth login
+            const connection = await prisma.calendarConnection.findUnique({
+              where: {
+                userId_provider: { userId, provider: 'google' },
+              },
+              select: { expiresAt: true },
+            })
+
+            // Skip refresh if no connection (user hasn't connected calendar yet)
+            if (!connection) {
+              console.log(`[Context] Skipping token refresh for user ${userId}: no calendar connection`)
+              return
+            }
+
+            // Skip refresh if token is fresh (expires more than 10 minutes from now)
+            // This avoids refreshing tokens that were just issued during OAuth
+            if (connection.expiresAt && !isTokenExpired(connection.expiresAt, 10)) {
+              console.log(`[Context] Skipping token refresh for user ${userId}: token is still fresh (expires at ${connection.expiresAt.toISOString()})`)
+              return
+            }
+
+            // Token is expired or expiring soon - refresh it
+            console.log(`[Context] Token needs refresh for user ${userId}, refreshing...`)
             await getValidAccessToken(userId, 'google')
             console.log(`[Context] Successfully refreshed tokens for user ${userId}`)
           } catch (error: any) {
-            // Only log errors that aren't "no connection" (expected for users without calendar)
-            if (!error.message?.includes('CALENDAR_NOT_CONNECTED')) {
-              console.error(`[Context] Token refresh failed for user ${userId}:`, error.message || error)
-            }
-            // Re-throw to propagate error to all waiting callers
-            throw error
+            // Catch and log ALL errors - never let background refresh break the request
+            // This includes CALENDAR_NOT_CONNECTED, token decryption errors, network errors, etc.
+            console.error(`[Context] Token refresh failed for user ${userId}:`, error.message || error)
+            // Don't re-throw - this is a background operation that should never affect the response
           } finally {
             // Clean up the promise from the map so future requests can start a new refresh
             tokenRefreshPromises.delete(userId)
@@ -77,8 +100,9 @@ export async function createContext({ req, res }: CreateFastifyContextOptions) {
 
       // Fire and forget - don't block the request
       // Multiple concurrent requests will share the same refresh promise
+      // All errors are caught above, so this should never reject
       refreshPromise.catch(() => {
-        // Swallow errors here since they're already logged above
+        // Extra safety net - swallow any errors that somehow escape
         // This prevents unhandled promise rejections
       })
     }
