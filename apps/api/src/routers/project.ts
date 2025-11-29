@@ -331,8 +331,9 @@ export const projectRouter = router({
     }),
 
   /**
-   * Get user project defaults (billable status and phase)
-   * Returns the most recently used values for new entries
+   * Get user project defaults (billable status only)
+   * Phase is NOT included in defaults - it should remain event-specific
+   * Returns the most recently used billable status for new entries
    */
   getDefaults: protectedProcedure.query(async ({ ctx }) => {
     const defaults = await prisma.userProjectDefaults.findUnique({
@@ -362,13 +363,14 @@ export const projectRouter = router({
 
   /**
    * Update user project defaults
-   * Updates the default billable status and/or phase for new entries
+   * Updates the default billable status only (phase is not stored in defaults)
    */
   updateDefaults: protectedProcedure
     .input(
       z.object({
         isBillable: z.boolean().optional(),
-        phase: z.string().optional(),
+        // Phase is intentionally NOT included - it should never be saved to user defaults
+        // Phase should remain event-specific and not use defaults
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -377,11 +379,11 @@ export const projectRouter = router({
         create: {
           userId: ctx.user.id,
           isBillable: input.isBillable ?? true,
-          phase: input.phase ?? null,
+          phase: null, // Always null - phase should never be saved to defaults
         },
         update: {
           ...(input.isBillable !== undefined && { isBillable: input.isBillable }),
-          ...(input.phase !== undefined && { phase: input.phase || null }),
+          // Phase is NOT updated - it should always remain null
         },
       })
 
