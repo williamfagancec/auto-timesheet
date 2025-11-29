@@ -48,7 +48,8 @@
       "Bash(fold:*)",
       "Bash(/dev/null)",
       "Bash(xargs kill:*)",
-      "Bash(psql:*)"
+      "Bash(psql:*)",
+      "Bash(./start-with-env.sh)"
     ],
     "deny": [],
     "ask": []

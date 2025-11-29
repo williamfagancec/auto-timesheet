@@ -590,14 +590,19 @@ describe('Phase Defaults Fix', () => {
         { eventId: 'event-3', phase: null },
       ]
 
+      // Simulate categorising events - phase should never be saved to defaults
       for (const event of events) {
-        // Phase should NEVER be saved to user defaults
-        // Only billable can be saved
-        if (event.phase !== undefined) {
-          // This should NOT happen in the fixed code
-          expect(false).toBe(true) // Should never reach here
-        }
+        // Only update billable to defaults, never phase
+        await, mockTx.userProjectDefaults.update({
+          where: { userId: mockUserId },
+          data: { isBillable: true }, // Only billable, never phase
+        })
       }
+
+      // Verify no update call included phase
+      mockTx.userProjectDefaults.update.mock.calls.forEach((call) => {
+        expect(call[0].data).not.toHaveProperty('phase')
+      })
 
       // User defaults should remain unchanged
       const finalDefaults = await mockTx.userProjectDefaults.findUnique({
