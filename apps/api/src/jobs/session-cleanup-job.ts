@@ -1,5 +1,4 @@
 import { Queue, Worker } from 'bullmq'
-import { error } from 'console'
 import { prisma } from 'database'
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'

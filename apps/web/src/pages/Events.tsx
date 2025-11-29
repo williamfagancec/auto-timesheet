@@ -133,9 +133,10 @@ export function Events() {
   })
 
   const handleProjectSelect = (eventId: string, projectId: string) => {
-    // Get billable and phase for this event (use defaults if not set)
+    // Get billable for this event (use defaults if not set)
+    // Phase should NOT use defaults - only use if explicitly set for this event
     const isBillable = eventBillable[eventId] ?? userDefaults?.isBillable ?? true
-    const phase = eventPhase[eventId] ?? userDefaults?.phase ?? null
+    const phase = eventPhase[eventId] ?? null
 
     // Auto-save immediately when project is selected
     categorizeSingleMutation.mutate({
@@ -147,17 +148,8 @@ export function Events() {
       }]
     })
 
-    // Update defaults if they were explicitly set
-    if (eventBillable[eventId] !== undefined || eventPhase[eventId] !== undefined) {
-      const updateDefaults: { isBillable?: boolean; phase?: string } = {}
-      if (eventBillable[eventId] !== undefined) {
-        updateDefaults.isBillable = eventBillable[eventId]
-      }
-      if (eventPhase[eventId] !== undefined) {
-        updateDefaults.phase = eventPhase[eventId] || undefined
-      }
-      // Note: Defaults are updated in the backend when entries are saved
-    }
+    // Note: Billable defaults are updated in the backend when entries are saved
+    // Phase is NOT saved to user defaults - it should remain event-specific
   }
 
   const handleBillableChange = (eventId: string, isBillable: boolean) => {
@@ -526,7 +518,7 @@ export function Events() {
                                             eventId: event.id,
                                             projectId: event.projectId,
                                             isBillable: e.target.checked,
-                                            phase: eventPhase[event.id] ?? userDefaults?.phase ?? undefined,
+                                            phase: eventPhase[event.id] || undefined,
                                           }]
                                         })
                                       }
@@ -538,7 +530,7 @@ export function Events() {
                                 <input
                                   type="text"
                                   placeholder="Phase (optional)"
-                                  value={eventPhase[event.id] ?? userDefaults?.phase ?? ''}
+                                  value={eventPhase[event.id] ?? ''}
                                   onChange={(e) => {
                                     handlePhaseChange(event.id, e.target.value)
                                   }}
