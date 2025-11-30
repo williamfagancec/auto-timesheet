@@ -32,11 +32,12 @@
     "bullmq": "^5.1.5",
     "config": "workspace:*",
     "database": "workspace:*",
+    "date-fns-tz": "^2.0.1",
     "fastify": "^4.25.2",
+    "ioredis": "^5.8.2",
     "lucia": "^3.0.1",
     "redis": "^4.6.12",
     "shared": "workspace:*",
-    "date-fns-tz": "^2.0.1",
     "zod": "^3.22.4"
   },
   "devDependencies": {
