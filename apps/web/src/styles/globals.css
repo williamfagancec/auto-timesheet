@@ -3,6 +3,7 @@
 @tailwind utilities;
 
 @layer base {
+  /* Legacy CSS variables for backwards compatibility */
   :root {
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
@@ -27,10 +28,135 @@
   }
 
   * {
-    @apply border-border;
+    @apply box-border;
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-bg-primary text-text-primary font-sans antialiased;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Custom scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #d4d4d4;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #999999;
+  }
+}
+
+@layer components {
+  /* Button Components with Enhanced Styling */
+  .btn-primary {
+    @apply bg-gradient-primary text-white border-none px-lg py-sm rounded-lg text-sm font-medium cursor-pointer transition-all duration-300 flex items-center gap-sm hover:shadow-lg hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-text-primary border border-border-light px-lg py-sm rounded-lg text-sm font-medium cursor-pointer transition-all duration-300 hover:bg-bg-hover hover:shadow-md hover:border-border-medium disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-accent {
+    @apply bg-gradient-primary text-white border-none px-lg py-sm rounded-lg text-sm font-medium cursor-pointer transition-all duration-300 hover:shadow-glow hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-sm;
+  }
+
+  .btn-ghost {
+    @apply bg-transparent text-text-primary border-none px-lg py-sm rounded-lg text-sm font-medium cursor-pointer transition-all duration-300 hover:bg-bg-hover disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* Input Components with Enhanced Focus States */
+  .input-primary {
+    @apply w-full px-md py-md border border-border-medium rounded-lg text-base text-text-primary transition-all duration-300 focus:outline-none focus:border-accent-orange focus:ring-2 focus:ring-accent-orange focus:ring-opacity-20 placeholder:text-text-tertiary;
+  }
+
+  /* Card Components with Depth */
+  .card {
+    @apply bg-white border border-border-light rounded-xl p-xl cursor-pointer transition-all duration-300 hover:border-accent-orange hover:shadow-xl hover:scale-102;
+  }
+
+  .card-glass {
+    @apply bg-bg-glass backdrop-blur-sm border border-border-light rounded-xl p-xl transition-all duration-300 hover:shadow-xl;
+  }
+
+  /* Navigation Item with Active States */
+  .nav-item {
+    @apply flex items-center gap-md px-lg py-sm text-text-primary text-base cursor-pointer transition-all duration-300 no-underline hover:bg-gradient-mesh rounded-lg relative;
+  }
+
+  .nav-item-active {
+    @apply bg-gradient-mesh text-accent-orange font-medium;
+  }
+
+  .nav-item-active::before {
+    content: '';
+    @apply absolute bottom-0 left-2 right-2 h-0.5 bg-gradient-primary rounded-full;
+  }
+
+  /* Stats Card */
+  .stats-card {
+    @apply bg-gradient-mesh border border-border-light rounded-xl p-lg transition-all duration-300 hover:shadow-lg hover:scale-105;
+  }
+
+  /* Progress Bar */
+  .progress-bar {
+    @apply h-2 bg-bg-secondary rounded-full overflow-hidden;
+  }
+
+  .progress-bar-fill {
+    @apply h-full bg-gradient-primary transition-all duration-500 ease-out rounded-full;
+  }
+
+  /* Badge Component */
+  .badge {
+    @apply inline-flex items-center px-sm py-xs text-xs font-medium rounded-full transition-all duration-300;
+  }
+
+  .badge-success {
+    @apply bg-green-100 text-green-800 hover:bg-green-200;
+  }
+
+  .badge-warning {
+    @apply bg-amber-100 text-amber-800 hover:bg-amber-200;
+  }
+
+  .badge-info {
+    @apply bg-blue-100 text-blue-800 hover:bg-blue-200;
+  }
+
+  .badge-purple {
+    @apply bg-purple-100 text-purple-800 hover:bg-purple-200;
+  }
+
+  /* Glassmorphism Effect */
+  .glass-effect {
+    @apply bg-bg-glass backdrop-blur-md border border-white border-opacity-20 shadow-xl;
+  }
+
+  /* Animated Loading Spinner */
+  .spinner {
+    @apply animate-spin rounded-full border-4 border-accent-orange border-t-transparent;
+  }
+
+  /* Shimmer Effect for Loading States */
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.5) 50%,
+      rgba(255, 255, 255, 0) 100%
+    );
+    background-size: 200% 100%;
+    @apply animate-shimmer;
   }
 }
