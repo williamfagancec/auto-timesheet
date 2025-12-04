@@ -593,7 +593,7 @@ describe('Phase Defaults Fix', () => {
       // Simulate categorising events - phase should never be saved to defaults
       for (const event of events) {
         // Only update billable to defaults, never phase
-        await, mockTx.userProjectDefaults.update({
+        await mockTx.userProjectDefaults.update({
           where: { userId: mockUserId },
           data: { isBillable: true }, // Only billable, never phase
         })
