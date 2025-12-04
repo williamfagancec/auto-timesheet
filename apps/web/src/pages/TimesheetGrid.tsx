@@ -88,6 +88,18 @@ export function TimesheetGrid() {
   // Get utils for cache manipulation
   const utils = trpc.useUtils()
 
+  // Reset to events mutation
+  const resetToEventsMutation = trpc.timesheet.resetToEvents.useMutation({
+    onSuccess: (data) => {
+      alert(`Successfully reset! Removed ${data.deletedCount} manual entries.`)
+      // Invalidate the grid to refresh data
+      utils.timesheet.getWeeklyGrid.invalidate({ weekStartDate: weekStart.toISOString() })
+    },
+    onError: (error) => {
+      alert(`Failed to reset: ${error.message}`)
+    },
+  })
+
   // Update cell mutation - simple, no complex state management
   const updateCellMutation = trpc.timesheet.updateCell.useMutation({
     onSuccess: (_data, variables) => {
@@ -362,10 +374,15 @@ export function TimesheetGrid() {
 
   if (isLoading) {
     return (
-      <div className="max-w-full mx-auto p-8">
-        <div className="text-center py-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading timesheet...</p>
+      <div className="max-w-full mx-auto">
+        <div className="text-center py-12 animate-fade-in">
+          <div className="spinner h-16 w-16 mx-auto"></div>
+          <p className="mt-lg text-text-secondary font-medium">Loading timesheet...</p>
+          <div className="mt-md flex items-center justify-center gap-sm">
+            <div className="w-2 h-2 bg-accent-orange rounded-full animate-bounce" />
+            <div className="w-2 h-2 bg-accent-purple rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+            <div className="w-2 h-2 bg-accent-blue rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+          </div>
         </div>
       </div>
     )
@@ -373,8 +390,8 @@ export function TimesheetGrid() {
 
   if (!gridData) {
     return (
-      <div className="max-w-full mx-auto p-8">
-        <div className="text-center py-12 text-gray-600">No data available</div>
+      <div className="max-w-full mx-auto">
+        <div className="text-center py-12 text-text-secondary animate-fade-in">No data available</div>
       </div>
     )
   }
@@ -382,97 +399,128 @@ export function TimesheetGrid() {
   const isThisWeek =
     format(weekStart, 'yyyy-MM-dd') === format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
 
+  // Handle reset to events
+  const handleResetToEvents = () => {
+    if (!confirm('Are you sure you want to reset this week to events only? This will remove all manual entries and cannot be undone.')) {
+      return
+    }
+    resetToEventsMutation.mutate({ weekStartDate: weekStart.toISOString() })
+  }
+
   return (
-    <div className="max-w-full mx-auto p-8">
+    <div className="max-w-full mx-auto animate-fade-in-up">
       {/* Header */}
-      <div className="mb-6 flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Weekly Timesheet</h1>
-          <p className="text-gray-600 mt-1">
+      <div className="mb-xl flex justify-between items-center">
+        <div className="animate-slide-in-left">
+          <h1 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">Weekly Timesheet</h1>
+          <p className="text-text-secondary mt-xs text-sm flex items-center gap-sm">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
             {format(weekStart, 'MMMM d')} - {format(weekEnd, 'MMMM d, yyyy')}
-            {isThisWeek && <span className="ml-2 text-sm text-blue-600 font-medium">(This week)</span>}
+            {isThisWeek && <span className="ml-sm badge badge-warning animate-pulse">This week</span>}
           </p>
         </div>
 
         {/* Week Navigation & Actions */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-md animate-slide-in-right">
           {/* Global save indicator */}
           {hasPendingSaves() && (
-            <div className="flex items-center gap-2 text-sm text-blue-600">
-              <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse" />
-              <span>Saving...</span>
+            <div className="flex items-center gap-sm px-md py-sm bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg shadow-sm animate-scale-in">
+              <div className="spinner w-4 h-4" />
+              <span className="text-sm text-blue-700 font-medium">Saving...</span>
             </div>
           )}
-          <div className="flex gap-2">
+          <div className="flex gap-sm">
             <button
               onClick={handlePrevWeek}
-              className="px-3 py-2 border rounded-md hover:bg-gray-50"
+              className="btn-secondary"
             >
               ← Prev
             </button>
             <button
               onClick={handleThisWeek}
               disabled={isThisWeek}
-              className="px-4 py-2 border rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn-secondary"
             >
               This Week
             </button>
             <button
               onClick={handleNextWeek}
-              className="px-3 py-2 border rounded-md hover:bg-gray-50"
+              className="btn-secondary"
             >
               Next →
+            </button>
+            <button
+              onClick={handleResetToEvents}
+              disabled={resetToEventsMutation.isPending}
+              className="bg-gradient-to-r from-orange-500 to-orange-600 text-white border-none px-lg py-sm rounded-lg text-sm font-medium cursor-pointer transition-all duration-300 hover:shadow-lg hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-sm"
+              title="Remove all manual entries and keep only event-sourced hours"
+            >
+              {resetToEventsMutation.isPending ? (
+                <>
+                  <div className="spinner w-4 h-4" />
+                  Resetting...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  Reset to Events
+                </>
+              )}
             </button>
           </div>
         </div>
       </div>
 
       {/* Legend */}
-      <div className="mb-4 flex items-center gap-6 text-sm text-gray-600">
-        <span className="font-medium">Cell colors:</span>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-blue-50 border border-gray-300 rounded"></div>
+      <div className="mb-lg flex items-center gap-lg text-sm text-text-secondary">
+        <span className="font-medium text-text-primary">Cell colors:</span>
+        <div className="flex items-center gap-sm">
+          <div className="w-4 h-4 bg-blue-50 border border-border-medium rounded"></div>
           <span>From events</span>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-orange-50 border border-gray-300 rounded"></div>
+        <div className="flex items-center gap-sm">
+          <div className="w-4 h-4 bg-orange-50 border border-border-medium rounded"></div>
           <span>Manual entry</span>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-yellow-50 border border-gray-300 rounded"></div>
+        <div className="flex items-center gap-sm">
+          <div className="w-4 h-4 bg-yellow-50 border border-border-medium rounded"></div>
           <span>Mixed (events + manual)</span>
         </div>
       </div>
 
       {/* Grid Table */}
-      <div className="bg-white rounded-lg border overflow-x-auto">
+      <div className="bg-white rounded-lg border border-border-light shadow-sm overflow-x-auto">
         <table className="w-full border-collapse">
           <thead>
-            <tr className="border-b bg-gray-50">
-              <th className="text-left p-4 font-medium text-gray-700 border-r min-w-[250px]">
+            <tr className="border-b border-border-light bg-sandy">
+              <th className="text-left p-lg font-medium text-text-primary border-r border-border-light min-w-[250px]">
                 Project
               </th>
               {DAY_NAMES.map((day, index) => (
                 <th
                   key={day.key}
-                  className="text-center p-4 font-medium text-gray-700 border-r min-w-[100px]"
+                  className="text-center p-lg font-medium text-text-primary border-r border-border-light min-w-[100px]"
                 >
                   <div>{day.short}</div>
-                  <div className="text-xs font-normal text-gray-500 mt-1">
+                  <div className="text-xs font-normal text-text-tertiary mt-xs">
                     {getDayDate(index)}
                   </div>
                 </th>
               ))}
-              <th className="text-center p-4 font-medium text-gray-700 min-w-[100px]">
+              <th className="text-center p-lg font-medium text-text-primary min-w-[100px]">
                 Weekly Total
               </th>
             </tr>
           </thead>
           <tbody>
             {gridData.projects.map((project) => (
-              <tr key={project.id} className="border-b hover:bg-gray-50">
-                <td className="p-4 border-r">
-                  <div className="font-medium text-gray-900">{project.name}</div>
+              <tr key={project.id} className="border-b border-border-light hover:bg-bg-hover transition-colors duration-150">
+                <td className="p-lg border-r border-border-light">
+                  <div className="font-medium text-text-primary">{project.name}</div>
                 </td>
                 {DAY_NAMES.map((day) => {
                   const serverHours = project.dailyHours[day.key]
@@ -515,13 +563,13 @@ export function TimesheetGrid() {
                   return (
                     <td
                       key={day.key}
-                      className={`text-center p-2 border-r cursor-pointer relative ${
+                      className={`text-center p-sm border-r border-border-light cursor-pointer relative ${
                         cellType === 'event' ? 'bg-blue-50' :
                         cellType === 'mixed' ? 'bg-yellow-50' :
                         cellType === 'manual' ? 'bg-orange-50' :
-                        'bg-gray-50'
+                        'bg-bg-secondary'
                       } ${
-                        isActive ? 'ring-2 ring-blue-500 ring-inset' : ''
+                        isActive ? 'ring-2 ring-accent-orange ring-inset' : ''
                       } ${
                         isSaving ? 'opacity-75' : ''
                       } ${
@@ -545,7 +593,7 @@ export function TimesheetGrid() {
                         onKeyDown={(e) => handleKeyDown(e, project.id, day.key)}
                         onClick={(e) => e.stopPropagation()}
                         className={`w-full text-center bg-transparent outline-none ${
-                          hours > 0 ? 'font-medium text-gray-900' : 'text-gray-400'
+                          hours > 0 ? 'font-medium text-text-primary' : 'text-text-tertiary'
                         } ${
                           hasError ? 'text-red-600' : ''
                         } [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
@@ -563,15 +611,15 @@ export function TimesheetGrid() {
                     </td>
                   )
                 })}
-                <td className="text-center p-4 font-medium text-gray-900">
+                <td className="text-center p-lg font-medium text-text-primary border-border-light">
                   {formatHours(project.weeklyTotal)}
                 </td>
               </tr>
             ))}
 
             {/* Daily Totals Row */}
-            <tr className="border-t-2 bg-gray-50 font-medium">
-              <td className="p-4 border-r text-gray-700">Daily Total</td>
+            <tr className="border-t-2 border-border-medium bg-sandy font-medium">
+              <td className="p-lg border-r border-border-light text-text-primary">Daily Total</td>
               {DAY_NAMES.map((day) => {
                 const total = gridData.dailyTotals[day.key]
                 const target = gridData.targetHoursPerDay
@@ -580,18 +628,18 @@ export function TimesheetGrid() {
                 return (
                   <td
                     key={day.key}
-                    className="text-center p-4 border-r"
+                    className="text-center p-lg border-r border-border-light"
                   >
-                    <div className={isUnderTarget ? 'text-red-600' : 'text-gray-900'}>
+                    <div className={isUnderTarget ? 'text-red-600' : 'text-text-primary'}>
                       {formatHours(total)}
                     </div>
                     {isUnderTarget && (
-                      <div className="text-red-500 text-xs mt-1">▲</div>
+                      <div className="text-red-500 text-xs mt-xs">▲</div>
                     )}
                   </td>
                 )
               })}
-              <td className="text-center p-4 text-gray-900">
+              <td className="text-center p-lg text-text-primary">
                 {formatHours(Object.values(gridData.dailyTotals).reduce((sum, val) => sum + val, 0))}
               </td>
             </tr>
@@ -601,28 +649,31 @@ export function TimesheetGrid() {
 
       {/* Notes Field (shown as dropdown when cell is active) */}
       {activeCell && (
-        <div ref={notesRef} className="mt-4 bg-white p-4 rounded-lg border shadow-lg">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Details for {gridData.projects.find((p) => p.id === activeCell.projectId)?.name} - {DAY_NAMES.find((d) => d.key === activeCell.day)?.short}
-          </label>
+        <div ref={notesRef} className="mt-lg bg-white rounded-lg border border-border-light shadow-md overflow-hidden">
+          <div className="bg-sandy px-lg py-md border-b border-border-light">
+            <label className="block text-sm font-medium text-text-primary">
+              Details for {gridData.projects.find((p) => p.id === activeCell.projectId)?.name} - {DAY_NAMES.find((d) => d.key === activeCell.day)?.short}
+            </label>
+          </div>
+          <div className="p-lg">
 
           {/* Billable Toggle and Phase Input */}
-          <div className="flex items-center gap-4 mb-3">
-            <label className="flex items-center gap-2 cursor-pointer">
+          <div className="flex items-center gap-md mb-md">
+            <label className="flex items-center gap-sm cursor-pointer">
               <input
                 type="checkbox"
                 checked={isBillable}
                 onChange={(e) => setIsBillable(e.target.checked)}
-                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                className="w-4 h-4 text-accent-orange border-border-medium rounded focus:ring-accent-orange"
               />
-              <span className="text-sm text-gray-700">Billable</span>
+              <span className="text-sm text-text-primary">Billable</span>
             </label>
             <input
               type="text"
               placeholder="Phase (optional)"
               value={phase}
               onChange={(e) => setPhase(e.target.value)}
-              className="flex-1 px-3 py-1 text-sm border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="flex-1 px-md py-xs text-sm border border-border-medium rounded-md focus:outline-none focus:border-text-secondary"
             />
           </div>
 
@@ -632,10 +683,10 @@ export function TimesheetGrid() {
             onChange={(e) => setNotes(e.target.value)}
             onClick={(e) => e.stopPropagation()}
             placeholder="Enter notes for this entry..."
-            className="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full px-md py-sm border border-border-medium rounded-md focus:outline-none focus:border-text-secondary"
             rows={3}
           />
-          <div className="mt-2 flex justify-end gap-2">
+          <div className="flex justify-end gap-sm">
             <button
               onClick={() => {
                 setActiveCell(null)
@@ -643,17 +694,18 @@ export function TimesheetGrid() {
                 setIsBillable(userDefaults?.isBillable ?? true)
                 setPhase(userDefaults?.phase ?? '')
               }}
-              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
+              className="btn-ghost text-sm"
             >
               Cancel
             </button>
             <button
               onClick={handleNotesSave}
               disabled={updateCellMutation.isPending}
-              className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50"
+              className="btn-primary text-sm"
             >
               {updateCellMutation.isPending ? 'Saving...' : 'Save'}
             </button>
+          </div>
           </div>
         </div>
       )}

@@ -136,6 +136,14 @@ server.get('/auth/google/callback', async (request, reply) => {
 
     const tokens = await google.validateAuthorizationCode(code, storedOAuth.codeVerifier)
 
+    // Log token status for debugging
+    console.log('[OAuth Callback] Token validation', {
+      hasAccessToken: !!tokens.accessToken(),
+      hasRefreshToken: !!tokens.refreshToken(),
+      accessTokenLength: tokens.accessToken()?.length,
+      expiresAt: tokens.accessTokenExpiresAt(),
+    })
+
     // Fetch user info from Google
     const googleUserResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
       headers: {
@@ -144,15 +152,28 @@ server.get('/auth/google/callback', async (request, reply) => {
     })
 
     if (!googleUserResponse.ok) {
-      console.error('[OAuth Callback] Failed to fetch Google user info:', googleUserResponse.status)
+      const errorText = await googleUserResponse.text()
+      console.error('[OAuth Callback] Failed to fetch Google user info:', googleUserResponse.status, errorText)
       return reply.redirect(`${frontendUrl}/login?error=oauth_failed`)
     }
 
-    const googleUser = (await googleUserResponse.json()) as {
+    let googleUser: {
       id: string
       email: string
       name?: string
       picture?: string
+    }
+
+    try {
+      const responseText = await googleUserResponse.text()
+      console.log('[OAuth Callback] Google user info response length:', responseText.length)
+      console.log('[OAuth Callback] Google user info response preview:', responseText.substring(0, 200))
+      googleUser = JSON.parse(responseText)
+    } catch (jsonError) {
+      console.error('[OAuth Callback] Failed to parse Google user info JSON:', jsonError)
+      console.error('[OAuth Callback] Response status:', googleUserResponse.status)
+      console.error('[OAuth Callback] Response headers:', Object.fromEntries(googleUserResponse.headers.entries()))
+      return reply.redirect(`${frontendUrl}/login?error=oauth_failed`)
     }
 
     if (!googleUser.email) {

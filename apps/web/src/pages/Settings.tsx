@@ -57,33 +57,34 @@ export function Settings() {
 
   if (isLoading) {
     return (
-      <div className="max-w-4xl mx-auto p-8">
+      <div className="max-w-4xl mx-auto">
         <div className="text-center py-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading settings...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent-orange mx-auto"></div>
+          <p className="mt-lg text-text-secondary">Loading settings...</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="max-w-4xl mx-auto p-8">
+    <div className="max-w-4xl mx-auto">
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Settings</h1>
-        <p className="mt-2 text-gray-600">Manage your integrations and preferences</p>
+      <div className="mb-xl">
+        <h1 className="text-2xl font-semibold text-text-primary">Settings</h1>
+        <p className="mt-xs text-sm text-text-secondary">Manage your integrations and preferences</p>
       </div>
 
       {/* RM Integration Section */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="border-b pb-4 mb-6">
-          <h2 className="text-xl font-semibold text-gray-900">
+      <div className="bg-white rounded-lg border border-border-light shadow-sm overflow-hidden">
+        <div className="bg-sandy px-xl py-lg border-b border-border-light">
+          <h2 className="text-xl font-semibold text-text-primary">
             RM Integration
           </h2>
-          <p className="mt-1 text-sm text-gray-600">
+          <p className="mt-xs text-sm text-text-secondary">
             Connect to Resource Management by Smartsheet to sync your timesheet entries
           </p>
         </div>
+        <div className="p-xl">
 
         {connection ? (
           /* Connected State */
@@ -227,6 +228,7 @@ export function Settings() {
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   )

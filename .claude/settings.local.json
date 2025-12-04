@@ -49,7 +49,11 @@
       "Bash(/dev/null)",
       "Bash(xargs kill:*)",
       "Bash(psql:*)",
-      "Bash(./start-with-env.sh)"
+      "Bash(./start-with-env.sh)",
+      "Bash(timeout 10 pnpm dev:web:*)",
+      "Bash(tail:*)",
+      "Bash(timeout 10 psql:*)",
+      "Bash(timeout 3 tail:*)"
     ],
     "deny": [],
     "ask": []
