@@ -167,7 +167,10 @@ server.get('/auth/google/callback', async (request, reply) => {
     try {
       const responseText = await googleUserResponse.text()
       console.log('[OAuth Callback] Google user info response length:', responseText.length)
-      console.log('[OAuth Callback] Google user info response preview:', responseText.substring(0, 200))
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('[OAuth Callback] Google user info response preview:', responseText.substring (0, 200))
+        }
+        }
       googleUser = JSON.parse(responseText)
     } catch (jsonError) {
       console.error('[OAuth Callback] Failed to parse Google user info JSON:', jsonError)

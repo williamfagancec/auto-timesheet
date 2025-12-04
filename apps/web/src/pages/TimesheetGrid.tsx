@@ -454,7 +454,7 @@ export function TimesheetGrid() {
             <button
               onClick={handleResetToEvents}
               disabled={resetToEventsMutation.isPending}
-              className="bg-gradient-to-r from-orange-500 to-orange-600 text-white border-none px-lg py-sm rounded-lg text-sm font-medium cursor-pointer transition-all duration-300 hover:shadow-lg hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-sm"
+              className="bg-gradient-primary text-white border-none px-lg py-sm rounded-lg text-sm font-medium cursor-pointer transition-all duration-300 hover:shadow-lg hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-sm"
               title="Remove all manual entries and keep only event-sourced hours"
             >
               {resetToEventsMutation.isPending ? (

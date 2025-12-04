@@ -48,12 +48,12 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #d4d4d4;
+    background: theme('colors.border.medium');
     border-radius: 4px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: #999999;
+    background: theme('colors.text.tertiary');
   }
 }
 
@@ -82,7 +82,7 @@
 
   /* Card Components with Depth */
   .card {
-    @apply bg-white border border-border-light rounded-xl p-xl cursor-pointer transition-all duration-300 hover:border-accent-orange hover:shadow-xl hover:scale-102;
+    @apply bg-white border border-border-light rounded-xl p-xl cursor-pointer transition-all duration-300 hover:border-accent-orange hover:shadow-xl hover:scale-105;
   }
 
   .card-glass {

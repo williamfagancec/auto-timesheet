@@ -1,5 +1,5 @@
 import { trpc } from '../lib/trpc'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation, Link } from 'react-router-dom'
 
 interface LayoutProps {
   children: React.ReactNode
@@ -26,7 +26,8 @@ export function Layout({ children }: LayoutProps) {
     if (parts.length >= 2) {
       return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
     }
-    return email.slice(0, 2).toUpperCase()
+    const prefix = email.split('@')[0]
+    return prefix.slice(0, 2).toUpperCase()
   }
 
   const isActive = (path: string) => {
@@ -58,15 +59,14 @@ export function Layout({ children }: LayoutProps) {
 
               {/* Navigation */}
               <nav className="flex items-center gap-1">
-                <button
-                  onClick={() => navigate('/timesheet')}
-                  className={`nav-item ${isActive('/timesheet') ? 'nav-item-active' : ''}`}
-                >
+                <Link
+                to="/timesheet"
+                className={`nav-item ${isActive('/timesheet') ? 'nav-item-active' : ''}`}>
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                   </svg>
                   Timesheet
-                </button>
+                </Link>
                 <button
                   onClick={() => navigate('/events')}
                   className={`nav-item ${isActive('/events') ? 'nav-item-active' : ''}`}
