@@ -46,12 +46,9 @@ export function Layout({ children }: LayoutProps) {
             <div className="flex items-center gap-xl">
               {/* App Logo */}
               <div className="flex items-center gap-md animate-scale-in">
-                <div className="w-10 h-10 flex items-center justify-center">
+                <div className="w-14 h-14 flex items-center justify-center">
                   <img src="/logo.png" alt="TimeSync Logo" className="w-full h-full object-contain" />
                 </div>
-                <span className="text-lg font-semibold bg-gradient-primary bg-clip-text text-transparent hidden sm:block">
-                  TimeTracker
-                </span>
               </div>
 
               {/* Navigation */}

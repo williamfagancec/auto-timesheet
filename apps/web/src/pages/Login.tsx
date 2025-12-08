@@ -65,7 +65,7 @@ export function Login() {
         <div className="px-xl py-2xl text-center relative overflow-hidden" style={{ backgroundColor: '#f9f9f1' }}>
           <div className="absolute inset-0 bg-gradient-mesh opacity-30" />
           <div className="relative flex flex-col items-center gap-md">
-            <div className="w-32 h-32 flex items-center justify-center animate-bounce-subtle">
+            <div className="w-48 h-48 flex items-center justify-center animate-bounce-subtle">
               <img src="/logo.png" alt="TimeSync Logo" className="w-full h-full object-contain" />
             </div>
             <div>
