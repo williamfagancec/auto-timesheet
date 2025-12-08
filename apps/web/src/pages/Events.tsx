@@ -488,7 +488,7 @@ export function Events() {
                     <div
                       key={event.id}
                       className={`px-xl py-lg transition-all duration-300 hover:bg-gradient-mesh ${
-                        isCategorized ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-l-4 border-l-green-500' : ''
+                        isCategorized ? 'border-l-4 border-l-green-500' : ''
                       } ${isSkipped ? 'bg-bg-hover opacity-60' : ''}`}
                     >
                       <div className="flex items-start gap-lg">

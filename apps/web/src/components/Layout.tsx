@@ -46,10 +46,8 @@ export function Layout({ children }: LayoutProps) {
             <div className="flex items-center gap-xl">
               {/* App Logo */}
               <div className="flex items-center gap-md animate-scale-in">
-                <div className="w-10 h-10 bg-gradient-primary rounded-xl flex items-center justify-center shadow-glow">
-                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
+                <div className="w-10 h-10 flex items-center justify-center">
+                  <img src="/logo.png" alt="TimeSync Logo" className="w-full h-full object-contain" />
                 </div>
                 <span className="text-lg font-semibold bg-gradient-primary bg-clip-text text-transparent hidden sm:block">
                   TimeTracker
