@@ -39,14 +39,14 @@ export function Layout({ children }: LayoutProps) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-sandy-light via-bg-secondary to-sandy-light">
       {/* Header Navigation with Glass Effect */}
-      <header className="glass-effect sticky top-0 z-50 animate-fade-in-down">
+      <header className="sticky top-0 z-50 animate-fade-in-down" style={{ backgroundColor: '#f9f9f1' }}>
         <div className="max-w-7xl mx-auto px-2xl">
           <div className="flex justify-between items-center h-16">
             {/* Logo & Navigation */}
             <div className="flex items-center gap-xl">
               {/* App Logo */}
               <div className="flex items-center gap-md animate-scale-in">
-                <div className="w-14 h-14 flex items-center justify-center">
+                <div className="w-20 h-20 flex items-center justify-center">
                   <img src="/logo.png" alt="TimeSync Logo" className="w-full h-full object-contain" />
                 </div>
               </div>

@@ -68,6 +68,7 @@ export function TimesheetGrid() {
   const invalidateTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   // Force re-render trigger (only for UI updates, not data storage)
+  // @ts-expect-error renderTrigger is used to force re-renders via setRenderTrigger
   const [renderTrigger, setRenderTrigger] = useState(0)
   const triggerRender = useCallback(() => setRenderTrigger((n) => n + 1), [])
 
@@ -106,18 +107,11 @@ export function TimesheetGrid() {
       const dayName = format(new Date(variables.date), 'EEE').toLowerCase()
       const key = `${variables.projectId}-${dayName}`
 
-      // Mark as synced and schedule cleanup
+      // Mark as synced with timestamp (keep entry, don't delete immediately)
       const change = pendingChangesRef.current.get(key)
       if (change && change.status === 'saving') {
         change.status = 'synced'
-        // Remove synced entries after a short delay
-        setTimeout(() => {
-          const current = pendingChangesRef.current.get(key)
-          if (current?.status === 'synced') {
-            pendingChangesRef.current.delete(key)
-            triggerRender()
-          }
-        }, 100)
+        change.timestamp = Date.now() // Mark when synced for cleanup later
       }
       triggerRender()
     },
@@ -169,26 +163,34 @@ export function TimesheetGrid() {
       triggerRender()
     }
 
-    // Schedule cache invalidation after all saves complete
+    // Invalidate cache immediately after all saves complete
     if (!hasSavingChanges && !hasChangesToSync) {
-      // All saves completed, invalidate cache
+      // All saves completed, invalidate cache immediately
       if (invalidateTimerRef.current) {
         clearTimeout(invalidateTimerRef.current)
       }
-      invalidateTimerRef.current = setTimeout(() => {
-        // Only invalidate if no pending changes
-        let hasPending = false
-        pendingChangesRef.current.forEach((change) => {
-          if (change.status !== 'synced' && change.status !== 'error') {
-            hasPending = true
-          }
-        })
-        if (!hasPending) {
-          utils.timesheet.getWeeklyGrid.invalidate({ weekStartDate: weekStart.toISOString() })
+      // Check if there are any non-synced/non-error changes
+      let hasPending = false
+      pendingChangesRef.current.forEach((change) => {
+        if (change.status !== 'synced' && change.status !== 'error') {
+          hasPending = true
         }
-        invalidateTimerRef.current = null
-      }, 500)
+      })
+      if (!hasPending) {
+        utils.timesheet.getWeeklyGrid.invalidate({ weekStartDate: weekStart.toISOString() })
+      }
+      invalidateTimerRef.current = null
     }
+
+    // Clean up synced entries after 2 seconds (once cache is fresh)
+    pendingChangesRef.current.forEach((change, key) => {
+      if (change.status === 'synced') {
+        const timeSinceSynced = Date.now() - change.timestamp
+        if (timeSinceSynced > 2000) {
+          pendingChangesRef.current.delete(key)
+        }
+      }
+    })
   }, [weekStart, updateCellMutation, activeCell, notes, isBillable, phase, utils, triggerRender]);
 
   // Start sync coordinator on mount
@@ -372,6 +374,32 @@ export function TimesheetGrid() {
     return format(date, 'dd MMM')
   }
 
+  // Calculate adjusted totals including pending changes
+  const getAdjustedWeeklyTotal = (project: NonNullable<typeof gridData>['projects'][0]) => {
+    let total = 0
+    DAY_NAMES.forEach((day) => {
+      const key = `${project.id}-${day.key}`
+      const pendingChange = getPendingChange(key)
+      const hasPending = pendingChange !== undefined && pendingChange.parsedHours !== null
+      const hours = hasPending ? (pendingChange.parsedHours ?? 0) : (project.dailyHours[day.key] || 0)
+      total += hours
+    })
+    return total
+  }
+
+  const getAdjustedDailyTotal = (dayKey: DayKey) => {
+    if (!gridData) return 0
+    let total = 0
+    gridData.projects.forEach((project) => {
+      const key = `${project.id}-${dayKey}`
+      const pendingChange = getPendingChange(key)
+      const hasPending = pendingChange !== undefined && pendingChange.parsedHours !== null
+      const hours = hasPending ? (pendingChange.parsedHours ?? 0) : (project.dailyHours[dayKey] || 0)
+      total += hours
+    })
+    return total
+  }
+
   if (isLoading) {
     return (
       <div className="max-w-full mx-auto">
@@ -548,10 +576,12 @@ export function TimesheetGrid() {
                   const cellType = hasEvents && hasManual ? 'mixed' : hasEvents ? 'event' : hasManual ? 'manual' : 'empty'
 
                   // Display logic:
-                  // 1. If cell has pending change, show pending value (raw string for dirty, formatted for queued/saving)
-                  // 2. Otherwise, show formatted hours from server
+                  // 1. If cell has pending change, show pending value
+                  //    - For dirty: show raw string (user is typing)
+                  //    - For queued/saving/synced: show formatted value
+                  // 2. Otherwise, show formatted hours from server cache
                   const displayValue = hasPending
-                    ? pendingChange.value
+                    ? (pendingChange.status === 'dirty' ? pendingChange.value : formatHours(pendingChange.parsedHours || 0))
                     : formatHours(serverHours)
 
                   // Build tooltip showing breakdown and status
@@ -612,7 +642,7 @@ export function TimesheetGrid() {
                   )
                 })}
                 <td className="text-center p-lg font-medium text-text-primary border-border-light">
-                  {formatHours(project.weeklyTotal)}
+                  {formatHours(getAdjustedWeeklyTotal(project))}
                 </td>
               </tr>
             ))}
@@ -621,7 +651,7 @@ export function TimesheetGrid() {
             <tr className="border-t-2 border-border-medium bg-sandy font-medium">
               <td className="p-lg border-r border-border-light text-text-primary">Daily Total</td>
               {DAY_NAMES.map((day) => {
-                const total = gridData.dailyTotals[day.key]
+                const total = getAdjustedDailyTotal(day.key)
                 const target = gridData.targetHoursPerDay
                 const isUnderTarget = total < target
 
@@ -640,7 +670,7 @@ export function TimesheetGrid() {
                 )
               })}
               <td className="text-center p-lg text-text-primary">
-                {formatHours(Object.values(gridData.dailyTotals).reduce((sum, val) => sum + val, 0))}
+                {formatHours(DAY_NAMES.reduce((sum, day) => sum + getAdjustedDailyTotal(day.key), 0))}
               </td>
             </tr>
           </tbody>

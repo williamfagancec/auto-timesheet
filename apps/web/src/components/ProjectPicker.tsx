@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Command } from 'cmdk'
 import { trpc } from '../lib/trpc'
 
@@ -27,6 +27,8 @@ export function ProjectPicker({
 }: ProjectPickerProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const [dropdownPosition, setDropdownPosition] = useState<'bottom' | 'top'>('bottom')
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   // Get tRPC utils for cache invalidation
   const utils = trpc.useUtils()
@@ -127,9 +129,27 @@ export function ProjectPicker({
     return () => document.removeEventListener('keydown', down)
   }, [])
 
+  // Calculate dropdown position when opening
+  useEffect(() => {
+    if (open && buttonRef.current) {
+      const buttonRect = buttonRef.current.getBoundingClientRect()
+      const dropdownHeight = 350 // Max height of dropdown (300px content + padding)
+      const spaceBelow = window.innerHeight - buttonRect.bottom
+      const spaceAbove = buttonRect.top
+
+      // If not enough space below but enough space above, show dropdown above
+      if (spaceBelow < dropdownHeight && spaceAbove > dropdownHeight) {
+        setDropdownPosition('top')
+      } else {
+        setDropdownPosition('bottom')
+      }
+    }
+  }, [open])
+
   return (
     <div className="relative">
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => setOpen(!open)}
         disabled={disabled}
@@ -151,7 +171,9 @@ export function ProjectPicker({
       </button>
 
       {open && (
-        <div className="absolute z-50 w-full mt-2 bg-white border rounded-lg shadow-lg">
+        <div className={`absolute z-50 w-full bg-white border rounded-lg shadow-lg ${
+          dropdownPosition === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'
+        }`}>
           <Command className="rounded-lg border-none" shouldFilter={false}>
             <div className="border-b px-3 py-2">
               <Command.Input
