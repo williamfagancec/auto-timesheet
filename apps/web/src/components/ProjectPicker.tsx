@@ -129,11 +129,13 @@ export function ProjectPicker({
     return () => document.removeEventListener('keydown', down)
   }, [])
 
+  const DROPDOWN_MAX_HEIGHT = 300;
+  const DROPDOWN_PADDING = 50; // Account for padding/borders
   // Calculate dropdown position when opening
   useEffect(() => {
     if (open && buttonRef.current) {
       const buttonRect = buttonRef.current.getBoundingClientRect()
-      const dropdownHeight = 350 // Max height of dropdown (300px content + padding)
+      const dropdownHeight = DROPDOWN_MAX_HEIGHT + DROPDOWN_PADDING
       const spaceBelow = window.innerHeight - buttonRect.bottom
       const spaceAbove = buttonRect.top
 

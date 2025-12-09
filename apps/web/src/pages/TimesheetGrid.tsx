@@ -68,8 +68,7 @@ export function TimesheetGrid() {
   const invalidateTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   // Force re-render trigger (only for UI updates, not data storage)
-  // @ts-expect-error renderTrigger is used to force re-renders via setRenderTrigger
-  const [renderTrigger, setRenderTrigger] = useState(0)
+  const [_renderTrigger, setRenderTrigger] = useState(0)
   const triggerRender = useCallback(() => setRenderTrigger((n) => n + 1), [])
 
   // Ref for notes container to handle clicks outside
@@ -381,7 +380,7 @@ export function TimesheetGrid() {
       const key = `${project.id}-${day.key}`
       const pendingChange = getPendingChange(key)
       const hasPending = pendingChange !== undefined && pendingChange.parsedHours !== null
-      const hours = hasPending ? (pendingChange.parsedHours ?? 0) : (project.dailyHours[day.key] || 0)
+      const hours = hasPending ? pendingChange.parsedHours : (project.dailyHours[day.key] || 0)
       total += hours
     })
     return total
@@ -394,7 +393,7 @@ export function TimesheetGrid() {
       const key = `${project.id}-${dayKey}`
       const pendingChange = getPendingChange(key)
       const hasPending = pendingChange !== undefined && pendingChange.parsedHours !== null
-      const hours = hasPending ? (pendingChange.parsedHours ?? 0) : (project.dailyHours[dayKey] || 0)
+      const hours = hasPending ? pendingChange.parsedHours : (project.dailyHours[day.key] || 0)
       total += hours
     })
     return total
