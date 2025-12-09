@@ -52,10 +52,8 @@ export function Signup() {
         <div className="bg-gradient-to-r from-sandy via-sandy-light to-sandy px-xl py-2xl text-center relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-mesh opacity-30" />
           <div className="relative flex flex-col items-center gap-md">
-            <div className="w-16 h-16 bg-gradient-primary rounded-2xl flex items-center justify-center shadow-glow animate-bounce-subtle">
-              <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
+            <div className="w-48 h-48 flex items-center justify-center animate-bounce-subtle">
+              <img src="/logo.png" alt="TimeSync Logo" className="w-full h-full object-contain" />
             </div>
             <div>
               <h2 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">Get Started</h2>
