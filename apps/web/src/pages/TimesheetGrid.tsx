@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { format, startOfWeek, endOfWeek, addWeeks, subWeeks } from 'date-fns'
 import { trpc } from '../lib/trpc'
+import { RMSyncButton } from '../components/RMSyncButton'
 
 type DayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
 
@@ -380,7 +381,7 @@ export function TimesheetGrid() {
       const key = `${project.id}-${day.key}`
       const pendingChange = getPendingChange(key)
       const hasPending = pendingChange !== undefined && pendingChange.parsedHours !== null
-      const hours = hasPending ? pendingChange.parsedHours : (project.dailyHours[day.key] || 0)
+      const hours = hasPending ? (pendingChange.parsedHours ?? 0) : (project.dailyHours[day.key] || 0)
       total += hours
     })
     return total
@@ -393,7 +394,7 @@ export function TimesheetGrid() {
       const key = `${project.id}-${dayKey}`
       const pendingChange = getPendingChange(key)
       const hasPending = pendingChange !== undefined && pendingChange.parsedHours !== null
-      const hours = hasPending ? pendingChange.parsedHours : (project.dailyHours[day.key] || 0)
+      const hours = hasPending ? (pendingChange.parsedHours ?? 0) : (project.dailyHours[dayKey] || 0)
       total += hours
     })
     return total
@@ -498,6 +499,13 @@ export function TimesheetGrid() {
                 </>
               )}
             </button>
+            <RMSyncButton
+              weekStart={weekStart}
+              onSyncComplete={() => {
+                // Invalidate the grid to refresh data after sync
+                utils.timesheet.getWeeklyGrid.invalidate({ weekStartDate: weekStart.toISOString() })
+              }}
+            />
           </div>
         </div>
       </div>

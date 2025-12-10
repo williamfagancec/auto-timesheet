@@ -451,6 +451,254 @@ pnpm db:seed          # Seed AI test data
 - `apps/api/src/jobs/session-cleanup-job.ts` - Session cleanup background job (NEW)
 - `apps/api/src/index.ts` - Integrated session cleanup job into server lifecycle
 
+### 📤 RM Integration Phase 3: Manual Sync - Complete (2025-12-10)
+
+**Status:** Fully implemented and ready for testing
+**Date Completed:** 2025-12-10
+
+### Features Implemented
+
+1. **Sync Service** (`apps/api/src/services/rm-sync.ts`)
+   - Preview sync (dry-run mode) - shows what will be synced without API calls
+   - Execute sync - pushes timesheet entries to RM API
+   - Hash-based change detection (SHA-256 of date+hours+notes)
+   - Smart sync: creates new entries, updates changed entries, skips unchanged
+   - Rate limit handling with exponential backoff and automatic retry
+   - Project mapping validation - skips unmapped projects with clear errors
+   - Zero-hour entry filtering
+   - Comprehensive error handling with detailed logging
+
+2. **Sync Orchestration**
+   - `startSync()` - Atomic sync initiation with race condition prevention
+   - `executeSyncEntries()` - Main sync execution with API calls
+   - `completeSync()` - Finalizes sync with status and statistics
+   - `getSyncHistory()` - Returns recent sync logs
+   - Partial unique index on `RMSyncLog(connectionId) WHERE status='RUNNING'` prevents concurrent syncs
+
+3. **tRPC Endpoints** (`apps/api/src/routers/rm.ts`)
+   - `rm.sync.preview` - Query endpoint for sync preview
+   - `rm.sync.execute` - Mutation endpoint to perform sync
+   - `rm.sync.history` - Query endpoint for sync history (limit parameter, default 10)
+   - Full Zod validation for date formats (YYYY-MM-DD)
+   - Error mapping for RM-specific errors (rate limits, not found, validation)
+
+4. **Frontend Components**
+   - **RMSyncButton** (`apps/web/src/components/RMSyncButton.tsx`)
+     * Conditionally renders only if user has RM connection
+     * "Sync to RM" button in timesheet header
+     * Opens preview modal showing sync summary
+     * Stats dashboard: total entries, to create, to update, to skip
+     * Unmapped projects warning with link to mapping page
+     * Detailed entries table with date, project, hours, action
+     * Color-coded action badges (create=green, update=blue, skip=gray)
+     * Confirmation dialog before executing sync
+     * Real-time sync progress indicator
+     * Success/failure alerts with detailed error messages
+   - **Integration** (`apps/web/src/pages/TimesheetGrid.tsx`)
+     * Added RMSyncButton next to "Reset to Events" button
+     * Auto-invalidates grid cache after successful sync
+     * Week-aware: syncs current displayed week
+
+5. **Sync Logic**
+   - Fetches timesheet entries for date range (filtered by project, not skipped)
+   - Groups by project and validates project mappings
+   - For each entry:
+     * Skips if zero hours
+     * Skips if project not mapped to RM
+     * Skips if already synced and content unchanged (hash match)
+     * Updates if synced but content changed
+     * Creates if not synced yet
+   - 100ms delay between API calls to avoid rate limits
+   - Rate limit retry: waits 2 seconds, retries once
+   - Not found errors: automatically disables invalid project mappings
+   - Transaction-safe: all database updates wrapped in proper error handling
+
+6. **Sync Status Tracking**
+   - Creates `RMSyncLog` entry with status RUNNING
+   - Updates `RMSyncedEntry` records with:
+     * `rmEntryId` - RM's time entry ID for future updates
+     * `lastSyncedAt` - Timestamp of last sync
+     * `lastSyncedHash` - Content hash for change detection
+     * `syncVersion` - Incremented on each update
+   - Final status: COMPLETED (all succeeded), PARTIAL (some failed), FAILED (all failed)
+   - Tracks statistics: attempted, success, failed, skipped
+   - Stores error details in `errorDetails` JSON field
+
+### Files Created
+
+**Backend:**
+```
+apps/api/src/services/
+└── rm-sync.ts (enhanced)       [MODIFIED] Added preview + execute functions
+```
+
+**Frontend:**
+```
+apps/web/src/components/
+└── RMSyncButton.tsx            [NEW] Sync button with preview modal
+```
+
+### Files Modified
+
+**Backend:**
+```
+apps/api/src/services/rm-sync.ts         [MODIFIED] Added core sync execution logic
+apps/api/src/routers/rm.ts               [MODIFIED] Added sync.preview, sync.execute, sync.history endpoints
+```
+
+**Frontend:**
+```
+apps/web/src/pages/TimesheetGrid.tsx     [MODIFIED] Added RMSyncButton integration
+```
+
+### Sync Flow
+
+**User Flow:**
+1. User navigates to Timesheet Grid page
+2. Clicks "Sync to RM" button (only visible if RM connected)
+3. Preview modal opens showing:
+   - Summary stats (total, create, update, skip counts)
+   - Unmapped projects warning (if any)
+   - Detailed entry list with actions
+4. User reviews and clicks "Sync X Entries"
+5. Confirmation dialog appears
+6. User confirms, sync executes with progress indicator
+7. Success/failure alert shows results
+8. Grid refreshes automatically
+
+**Technical Flow:**
+1. Frontend calls `rm.sync.preview` (dry-run)
+2. Backend fetches entries and mappings, calculates actions
+3. Frontend displays preview modal
+4. User confirms, frontend calls `rm.sync.execute`
+5. Backend creates RUNNING sync log
+6. Backend iterates entries, calling RM API create/update
+7. Backend tracks results, handles errors
+8. Backend completes sync log with final status
+9. Frontend shows results, invalidates grid cache
+
+### Performance Considerations
+
+- **Rate Limiting:** 100ms delay between requests = max 10 req/sec
+- **Retry Logic:** Single retry on rate limit (2-second delay)
+- **Batch Size:** Weekly timesheet = ~40 entries = ~4-5 seconds sync time
+- **Database Queries:** Optimized with includes and maps (O(n) complexity)
+- **Hash Calculation:** SHA-256 is fast (<1ms per entry)
+- **Cache Invalidation:** React Query automatic after mutations
+
+### Error Handling
+
+**Client-Side:**
+- Connection check before showing button
+- Preview validation before sync
+- Clear error messages in alerts
+- Modal remains open on errors
+
+**Server-Side:**
+- RMSyncError with typed error codes
+- Rate limit detection and retry
+- Not found detection (disables invalid mappings)
+- Validation errors with field details
+- Network errors with generic messages
+- Transaction rollback on failures
+- Detailed error logging for debugging
+
+### Testing Checklist
+
+**Prerequisites:**
+- RM connection configured (Settings page)
+- Project mappings created (at least 1 mapped project)
+- Timesheet entries for current week
+- Valid RM API token
+
+**Manual Test Steps:**
+
+1. **Test Preview:**
+   - Navigate to Timesheet Grid
+   - Click "Sync to RM"
+   - Verify modal opens with correct counts
+   - Verify unmapped projects warning appears (if applicable)
+   - Verify entry list shows correct actions
+   - Close modal without syncing
+
+2. **Test Sync Execution:**
+   - Open preview modal
+   - Click "Sync X Entries"
+   - Confirm dialog
+   - Wait for sync to complete
+   - Verify success message shows correct count
+   - Check grid refreshes automatically
+
+3. **Test Unmapped Projects:**
+   - Create timesheet entry for unmapped project
+   - Open preview modal
+   - Verify project appears in warning section
+   - Verify entry shows "Skip: Project not mapped to RM"
+   - Sync should succeed for mapped projects only
+
+4. **Test Update Detection:**
+   - Sync an entry
+   - Edit the entry (change hours or notes)
+   - Open preview modal
+   - Verify entry shows "Update" action
+   - Sync and verify RM receives update
+
+5. **Test No Changes:**
+   - Sync an entry
+   - Open preview modal without changes
+   - Verify entry shows "Skip: Already synced, no changes"
+   - Sync should skip entry
+
+6. **Test Error Handling:**
+   - Disconnect from RM (delete connection)
+   - Try to sync
+   - Verify button disappears
+   - Reconnect to RM
+   - Verify button reappears
+
+**Expected Behavior:**
+- ✅ Preview shows accurate counts
+- ✅ Unmapped projects clearly identified
+- ✅ Sync creates new RM entries
+- ✅ Sync updates changed entries
+- ✅ Sync skips unchanged entries
+- ✅ Sync skips zero-hour entries
+- ✅ Rate limits handled gracefully
+- ✅ Errors shown with clear messages
+- ✅ Grid refreshes after sync
+
+### Known Limitations
+
+1. **Synchronous Sync:**
+   - User must keep browser open during sync
+   - Weekly sync (40 entries) takes 4-5 seconds
+   - Can be upgraded to background jobs later
+
+2. **No Selective Sync:**
+   - Syncs entire week, cannot choose specific entries
+   - All-or-nothing per week
+
+3. **No Undo:**
+   - Cannot unsync an entry from UI
+   - Must delete in RM manually
+
+4. **Rate Limit Handling:**
+   - Single retry with 2-second delay
+   - Large syncs (100+ entries) may hit rate limits
+
+5. **No Real-Time Progress:**
+   - Progress indicator is generic spinner
+   - Cannot show per-entry progress
+
+### Future Enhancements (Out of Scope)
+
+- **Background Jobs:** Use BullMQ for async sync (requires Redis read-write)
+- **Selective Sync:** Checkboxes to choose specific entries
+- **Progress Tracking:** Real-time entry-by-entry progress
+- **Bi-Directional Sync:** Pull changes from RM back to time-tracker
+- **Sync Scheduling:** Auto-sync on Friday EOD
+- **Conflict Resolution:** Handle entries edited in both systems
+
 ---
 
 ### 🚧 Partially Implemented

@@ -9,6 +9,9 @@
 
 import { prisma } from "database";
 import { Prisma, RMSyncStatus, RMSyncDirection } from "@prisma/client";
+import { rmApi, RMRateLimitError, RMNotFoundError } from "./rm-api.js";
+import { getDecryptedToken } from "./rm-connection.js";
+import crypto from "crypto";
 
 /**
  * Custom error for sync-related issues
@@ -222,4 +225,563 @@ export async function cancelStuckSync(syncLogId: string, reason: string): Promis
   });
 
   console.log(`[RM Sync] Cancelled stuck sync ${syncLogId}: ${reason}`);
+}
+
+/**
+ * Calculate hash for change detection
+ * Hash includes: date + hours + notes to detect content changes
+ */
+function calculateEntryHash(date: Date, hours: number, notes: string | null): string {
+  const dateStr = date.toISOString().split("T")[0]; // YYYY-MM-DD
+  const content = `${dateStr}|${hours}|${notes || ""}`;
+  return crypto.createHash("sha256").update(content).digest("hex");
+}
+
+/**
+ * Convert minutes to decimal hours (rounded to 2 decimal places)
+ */
+function minutesToDecimalHours(minutes: number): number {
+  return Math.round((minutes / 60) * 100) / 100;
+}
+
+/**
+ * Single entry sync result
+ */
+interface EntrySyncResult {
+  timesheetEntryId: string;
+  status: "success" | "failed" | "skipped";
+  action?: "created" | "updated" | "no_change";
+  rmEntryId?: number;
+  error?: string;
+}
+
+/**
+ * Sync preview result (dry-run mode)
+ */
+export interface SyncPreviewResult {
+  totalEntries: number;
+  toCreate: number;
+  toUpdate: number;
+  toSkip: number;
+  unmappedProjects: Array<{ projectId: string; projectName: string }>;
+  entries: Array<{
+    timesheetEntryId: string;
+    projectName: string;
+    date: string;
+    hours: number;
+    action: "create" | "update" | "skip";
+    reason?: string;
+  }>;
+}
+
+/**
+ * Sync execution result
+ */
+export interface SyncExecutionResult {
+  syncLogId: string;
+  status: RMSyncStatus;
+  entriesAttempted: number;
+  entriesSuccess: number;
+  entriesFailed: number;
+  entriesSkipped: number;
+  errors: Array<{ entryId: string; error: string }>;
+}
+
+/**
+ * Preview sync without making API calls
+ * Shows what would be created/updated/skipped
+ */
+export async function previewSync(
+  userId: string,
+  fromDate: Date,
+  toDate: Date
+): Promise<SyncPreviewResult> {
+  // Get user's RM connection
+  const connection = await prisma.rMConnection.findUnique({
+    where: { userId },
+  });
+
+  if (!connection) {
+    throw new RMSyncError(
+      "No RM connection found - please connect your RM account first",
+      "NO_CONNECTION"
+    );
+  }
+
+  // Get all project mappings
+  const mappings = await prisma.rMProjectMapping.findMany({
+    where: {
+      connectionId: connection.id,
+      enabled: true,
+    },
+    include: {
+      project: true,
+    },
+  });
+
+  const mappingByProjectId = new Map(
+    mappings.map((m) => [m.projectId, m])
+  );
+
+  // Get timesheet entries in date range
+  const entries = await prisma.timesheetEntry.findMany({
+    where: {
+      userId,
+      date: {
+        gte: fromDate,
+        lte: toDate,
+      },
+      projectId: {
+        not: null,
+      },
+      isSkipped: false,
+    },
+    include: {
+      project: true,
+      rmSyncedEntry: true,
+    },
+    orderBy: {
+      date: "asc",
+    },
+  });
+
+  const preview: SyncPreviewResult = {
+    totalEntries: entries.length,
+    toCreate: 0,
+    toUpdate: 0,
+    toSkip: 0,
+    unmappedProjects: [],
+    entries: [],
+  };
+
+  const unmappedProjectIds = new Set<string>();
+
+  for (const entry of entries) {
+    if (!entry.projectId || !entry.project) {
+      preview.toSkip++;
+      preview.entries.push({
+        timesheetEntryId: entry.id,
+        projectName: "No Project",
+        date: entry.date.toISOString().split("T")[0],
+        hours: minutesToDecimalHours(entry.duration),
+        action: "skip",
+        reason: "No project assigned",
+      });
+      continue;
+    }
+
+    // Check if hours are zero
+    const hours = minutesToDecimalHours(entry.duration);
+    if (hours === 0) {
+      preview.toSkip++;
+      preview.entries.push({
+        timesheetEntryId: entry.id,
+        projectName: entry.project.name,
+        date: entry.date.toISOString().split("T")[0],
+        hours,
+        action: "skip",
+        reason: "Zero hours",
+      });
+      continue;
+    }
+
+    // Check if project is mapped
+    const mapping = mappingByProjectId.get(entry.projectId);
+    if (!mapping) {
+      if (!unmappedProjectIds.has(entry.projectId)) {
+        unmappedProjectIds.add(entry.projectId);
+        preview.unmappedProjects.push({
+          projectId: entry.projectId,
+          projectName: entry.project.name,
+        });
+      }
+      preview.toSkip++;
+      preview.entries.push({
+        timesheetEntryId: entry.id,
+        projectName: entry.project.name,
+        date: entry.date.toISOString().split("T")[0],
+        hours,
+        action: "skip",
+        reason: "Project not mapped to RM",
+      });
+      continue;
+    }
+
+    // Check if already synced
+    if (entry.rmSyncedEntry) {
+      // Calculate current hash
+      const currentHash = calculateEntryHash(entry.date, hours, entry.notes);
+
+      if (currentHash === entry.rmSyncedEntry.lastSyncedHash) {
+        preview.toSkip++;
+        preview.entries.push({
+          timesheetEntryId: entry.id,
+          projectName: entry.project.name,
+          date: entry.date.toISOString().split("T")[0],
+          hours,
+          action: "skip",
+          reason: "Already synced, no changes",
+        });
+      } else {
+        preview.toUpdate++;
+        preview.entries.push({
+          timesheetEntryId: entry.id,
+          projectName: entry.project.name,
+          date: entry.date.toISOString().split("T")[0],
+          hours,
+          action: "update",
+          reason: "Content changed since last sync",
+        });
+      }
+    } else {
+      preview.toCreate++;
+      preview.entries.push({
+        timesheetEntryId: entry.id,
+        projectName: entry.project.name,
+        date: entry.date.toISOString().split("T")[0],
+        hours,
+        action: "create",
+      });
+    }
+  }
+
+  return preview;
+}
+
+/**
+ * Execute sync for timesheet entries in date range
+ * This performs the actual API calls to RM
+ */
+export async function executeSyncEntries(
+  userId: string,
+  syncLogId: string,
+  fromDate: Date,
+  toDate: Date
+): Promise<SyncExecutionResult> {
+  // Get user's RM connection
+  const connection = await prisma.rMConnection.findUnique({
+    where: { userId },
+  });
+
+  if (!connection) {
+    throw new RMSyncError(
+      "No RM connection found - please connect your RM account first",
+      "NO_CONNECTION"
+    );
+  }
+
+  // Get decrypted API token
+  const token = await getDecryptedToken(userId);
+
+  // Get all project mappings
+  const mappings = await prisma.rMProjectMapping.findMany({
+    where: {
+      connectionId: connection.id,
+      enabled: true,
+    },
+  });
+
+  const mappingByProjectId = new Map(
+    mappings.map((m) => [m.projectId, m])
+  );
+
+  // Get timesheet entries in date range
+  const entries = await prisma.timesheetEntry.findMany({
+    where: {
+      userId,
+      date: {
+        gte: fromDate,
+        lte: toDate,
+      },
+      projectId: {
+        not: null,
+      },
+      isSkipped: false,
+    },
+    include: {
+      rmSyncedEntry: true,
+    },
+    orderBy: {
+      date: "asc",
+    },
+  });
+
+  const results: EntrySyncResult[] = [];
+  let attempted = 0;
+  let success = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  // Process each entry
+  for (const entry of entries) {
+    if (!entry.projectId) {
+      skipped++;
+      results.push({
+        timesheetEntryId: entry.id,
+        status: "skipped",
+        error: "No project assigned",
+      });
+      continue;
+    }
+
+    // Check if hours are zero
+    const hours = minutesToDecimalHours(entry.duration);
+    if (hours === 0) {
+      skipped++;
+      results.push({
+        timesheetEntryId: entry.id,
+        status: "skipped",
+        error: "Zero hours",
+      });
+      continue;
+    }
+
+    // Check if project is mapped
+    const mapping = mappingByProjectId.get(entry.projectId);
+    if (!mapping) {
+      skipped++;
+      results.push({
+        timesheetEntryId: entry.id,
+        status: "skipped",
+        error: "Project not mapped to RM",
+      });
+      continue;
+    }
+
+    attempted++;
+
+    try {
+      // Calculate current hash
+      const currentHash = calculateEntryHash(entry.date, hours, entry.notes);
+
+      // Check if already synced
+      if (entry.rmSyncedEntry) {
+        // Check if content has changed
+        if (currentHash === entry.rmSyncedEntry.lastSyncedHash) {
+          skipped++;
+          attempted--; // Don't count no-change as attempted
+          results.push({
+            timesheetEntryId: entry.id,
+            status: "skipped",
+            action: "no_change",
+            rmEntryId: entry.rmSyncedEntry.rmEntryId,
+          });
+          continue;
+        }
+
+        // Update existing entry in RM
+        const rmEntry = await rmApi.updateTimeEntry(
+          token,
+          connection.rmUserId,
+          entry.rmSyncedEntry.rmEntryId,
+          {
+            assignable_id: mapping.rmProjectId,
+            date: entry.date.toISOString().split("T")[0],
+            hours,
+            notes: entry.notes || undefined,
+          }
+        );
+
+        // Update synced entry record
+        await prisma.rMSyncedEntry.update({
+          where: { id: entry.rmSyncedEntry.id },
+          data: {
+            lastSyncedAt: new Date(),
+            lastSyncedHash: currentHash,
+            syncVersion: { increment: 1 },
+          },
+        });
+
+        success++;
+        results.push({
+          timesheetEntryId: entry.id,
+          status: "success",
+          action: "updated",
+          rmEntryId: rmEntry.id,
+        });
+      } else {
+        // Create new entry in RM
+        const rmEntry = await rmApi.createTimeEntry(
+          token,
+          connection.rmUserId,
+          {
+            assignable_id: mapping.rmProjectId,
+            date: entry.date.toISOString().split("T")[0],
+            hours,
+            notes: entry.notes || undefined,
+          }
+        );
+
+        // Create synced entry record
+        await prisma.rMSyncedEntry.create({
+          data: {
+            mappingId: mapping.id,
+            timesheetEntryId: entry.id,
+            rmEntryId: rmEntry.id,
+            lastSyncedAt: new Date(),
+            lastSyncedHash: currentHash,
+            syncVersion: 1,
+          },
+        });
+
+        // Update mapping last synced timestamp
+        await prisma.rMProjectMapping.update({
+          where: { id: mapping.id },
+          data: { lastSyncedAt: new Date() },
+        });
+
+        success++;
+        results.push({
+          timesheetEntryId: entry.id,
+          status: "success",
+          action: "created",
+          rmEntryId: rmEntry.id,
+        });
+      }
+
+      // Add small delay to avoid rate limits (100ms between requests)
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    } catch (error) {
+      failed++;
+
+      let errorMessage = "Unknown error";
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+
+      // Special handling for specific errors
+      if (error instanceof RMRateLimitError) {
+        // Wait 2 seconds and retry once
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+
+        try {
+          // Retry the operation
+          const currentHash = calculateEntryHash(entry.date, hours, entry.notes);
+
+          if (entry.rmSyncedEntry) {
+            await rmApi.updateTimeEntry(
+              token,
+              connection.rmUserId,
+              entry.rmSyncedEntry.rmEntryId,
+              {
+                assignable_id: mapping.rmProjectId,
+                date: entry.date.toISOString().split("T")[0],
+                hours,
+                notes: entry.notes || undefined,
+              }
+            );
+
+            await prisma.rMSyncedEntry.update({
+              where: { id: entry.rmSyncedEntry.id },
+              data: {
+                lastSyncedAt: new Date(),
+                lastSyncedHash: currentHash,
+                syncVersion: { increment: 1 },
+              },
+            });
+          } else {
+            const rmEntry = await rmApi.createTimeEntry(
+              token,
+              connection.rmUserId,
+              {
+                assignable_id: mapping.rmProjectId,
+                date: entry.date.toISOString().split("T")[0],
+                hours,
+                notes: entry.notes || undefined,
+              }
+            );
+
+            await prisma.rMSyncedEntry.create({
+              data: {
+                mappingId: mapping.id,
+                timesheetEntryId: entry.id,
+                rmEntryId: rmEntry.id,
+                lastSyncedAt: new Date(),
+                lastSyncedHash: currentHash,
+                syncVersion: 1,
+              },
+            });
+          }
+
+          // Retry succeeded
+          failed--; // Undo the failed increment
+          success++;
+          results.push({
+            timesheetEntryId: entry.id,
+            status: "success",
+            action: entry.rmSyncedEntry ? "updated" : "created",
+          });
+        } catch (retryError) {
+          // Retry failed
+          errorMessage = `Rate limited, retry failed: ${retryError instanceof Error ? retryError.message : String(retryError)}`;
+          results.push({
+            timesheetEntryId: entry.id,
+            status: "failed",
+            error: errorMessage,
+          });
+        }
+      } else if (error instanceof RMNotFoundError) {
+        // RM project may have been deleted - mark mapping as disabled
+        await prisma.rMProjectMapping.update({
+          where: { id: mapping.id },
+          data: { enabled: false },
+        });
+
+        errorMessage = "RM project not found - mapping disabled";
+        results.push({
+          timesheetEntryId: entry.id,
+          status: "failed",
+          error: errorMessage,
+        });
+      } else {
+        results.push({
+          timesheetEntryId: entry.id,
+          status: "failed",
+          error: errorMessage,
+        });
+      }
+    }
+  }
+
+  // Determine final status
+  let finalStatus: RMSyncStatus;
+  if (failed === 0 && attempted > 0) {
+    finalStatus = RMSyncStatus.COMPLETED;
+  } else if (success > 0 && failed > 0) {
+    finalStatus = RMSyncStatus.PARTIAL;
+  } else if (failed > 0) {
+    finalStatus = RMSyncStatus.FAILED;
+  } else {
+    finalStatus = RMSyncStatus.COMPLETED;
+  }
+
+  // Complete the sync
+  await completeSync(
+    syncLogId,
+    finalStatus,
+    {
+      entriesAttempted: attempted,
+      entriesSuccess: success,
+      entriesFailed: failed,
+      entriesSkipped: skipped,
+    },
+    failed > 0 ? `${failed} entries failed to sync` : undefined,
+    failed > 0 ? {
+      errors: results
+        .filter((r) => r.status === "failed")
+        .map((r) => ({ entryId: r.timesheetEntryId, error: r.error })),
+    } : undefined
+  );
+
+  return {
+    syncLogId,
+    status: finalStatus,
+    entriesAttempted: attempted,
+    entriesSuccess: success,
+    entriesFailed: failed,
+    entriesSkipped: skipped,
+    errors: results
+      .filter((r) => r.status === "failed" && r.error)
+      .map((r) => ({ entryId: r.timesheetEntryId, error: r.error! })),
+  };
 }

@@ -10,6 +10,7 @@ import { prisma } from "database";
 import * as RMConnection from "../services/rm-connection.js";
 import { rmApi } from "../services/rm-api.js";
 import { suggestMatches, getAutoMapSuggestions } from "../services/rm-project-matching.js";
+import * as RMSync from "../services/rm-sync.js";
 
 /**
  * Zod Schemas
@@ -33,6 +34,16 @@ const CreateBulkMappingsInput = z.array(CreateMappingInput);
 
 const DeleteMappingInput = z.object({
   id: z.string().min(1, "Mapping ID is required"),
+});
+
+const PreviewSyncInput = z.object({
+  fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format (YYYY-MM-DD)"),
+  toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format (YYYY-MM-DD)"),
+});
+
+const ExecuteSyncInput = z.object({
+  fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format (YYYY-MM-DD)"),
+  toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format (YYYY-MM-DD)"),
 });
 
 /**
@@ -543,6 +554,131 @@ export const rmRouter = router({
         return {
           success: true,
         };
+      }),
+  }),
+
+  /**
+   * Sync Management
+   */
+  sync: router({
+    /**
+     * Preview sync operation (dry-run)
+     * Shows what would be synced without making API calls
+     */
+    preview: protectedProcedure
+      .input(PreviewSyncInput)
+      .query(async ({ ctx, input }) => {
+        try {
+          const fromDate = new Date(input.fromDate + "T00:00:00.000Z");
+          const toDate = new Date(input.toDate + "T23:59:59.999Z");
+
+          const preview = await RMSync.previewSync(
+            ctx.user.id,
+            fromDate,
+            toDate
+          );
+
+          return preview;
+        } catch (error) {
+          if (error instanceof RMSync.RMSyncError) {
+            throw new TRPCError({
+              code: error.code === "NO_CONNECTION" ? "NOT_FOUND" : "BAD_REQUEST",
+              message: error.message,
+            });
+          }
+
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Failed to preview sync",
+          });
+        }
+      }),
+
+    /**
+     * Execute sync operation
+     * Pushes timesheet entries to RM for the specified date range
+     */
+    execute: protectedProcedure
+      .input(ExecuteSyncInput)
+      .mutation(async ({ ctx, input }) => {
+        try {
+          const fromDate = new Date(input.fromDate + "T00:00:00.000Z");
+          const toDate = new Date(input.toDate + "T23:59:59.999Z");
+
+          // Start the sync (creates RUNNING log)
+          const { syncLogId } = await RMSync.startSync(ctx.user.id);
+
+          // Execute the sync entries
+          const result = await RMSync.executeSyncEntries(
+            ctx.user.id,
+            syncLogId,
+            fromDate,
+            toDate
+          );
+
+          return result;
+        } catch (error) {
+          if (error instanceof RMSync.RMSyncError) {
+            const codeMap: Record<RMSync.RMSyncError["code"], "NOT_FOUND" | "CONFLICT" | "BAD_REQUEST"> = {
+              NO_CONNECTION: "NOT_FOUND",
+              SYNC_IN_PROGRESS: "CONFLICT",
+              SYNC_FAILED: "BAD_REQUEST",
+              INVALID_STATE: "BAD_REQUEST",
+            };
+
+            throw new TRPCError({
+              code: codeMap[error.code],
+              message: error.message,
+            });
+          }
+
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Failed to execute sync",
+          });
+        }
+      }),
+
+    /**
+     * Get sync history
+     * Returns recent sync logs for the user
+     */
+    history: protectedProcedure
+      .input(z.object({
+        limit: z.number().int().positive().max(50).optional().default(10),
+      }).optional())
+      .query(async ({ ctx, input }) => {
+        const connection = await prisma.rMConnection.findUnique({
+          where: { userId: ctx.user.id },
+        });
+
+        if (!connection) {
+          return [];
+        }
+
+        const logs = await RMSync.getSyncHistory(
+          connection.id,
+          input?.limit || 10
+        );
+
+        return logs.map((log) => ({
+          id: log.id,
+          status: log.status,
+          direction: log.direction,
+          entriesAttempted: log.entriesAttempted,
+          entriesSuccess: log.entriesSuccess,
+          entriesFailed: log.entriesFailed,
+          entriesSkipped: log.entriesSkipped,
+          errorMessage: log.errorMessage,
+          startedAt: log.startedAt.toISOString(),
+          completedAt: log.completedAt?.toISOString() || null,
+        }));
       }),
   }),
 });
