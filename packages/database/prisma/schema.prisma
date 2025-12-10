@@ -15,6 +15,7 @@ model User {
   email          String   @unique
   name           String?
   hashedPassword String?  // Optional: null for OAuth-only users
+  rmUserId       Int?     // RM user ID for this user (used when creating time entries)
   createdAt      DateTime @default(now())
 
   sessions        Session[]
@@ -243,7 +244,7 @@ model RMSyncedEntry {
   timesheetEntryId  String   @unique
 
   // RM entry details
-  rmEntryId         Int      // ID returned by RM API
+  rmEntryId         BigInt   // ID returned by RM API (uses BigInt for large IDs)
   rmEntryUrl        String?  // Optional: deep link to RM entry
 
   // Sync metadata

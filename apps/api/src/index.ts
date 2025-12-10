@@ -9,6 +9,8 @@ import { initializeCalendarSyncJobs, shutdownCalendarSyncJobs } from './jobs/cal
 import { initializeSessionCleanupJobs, shutdownSessionCleanupJobs } from './jobs/session-cleanup-job.js'
 import { getOAuthState } from './auth/oauth-state-store.js'
 
+export type { AppRouter } from './routers/index.js'
+
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001
 const HOST = process.env.HOST || '0.0.0.0'
 

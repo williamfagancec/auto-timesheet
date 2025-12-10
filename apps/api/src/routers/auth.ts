@@ -27,6 +27,7 @@ export const authRouter = router({
         id: ctx.user.id,
         email: ctx.user.email,
         name: ctx.user.name,
+        rmUserId: ctx.user.rmUserId,
       },
     }
   }),
@@ -181,6 +182,24 @@ export const authRouter = router({
 
     return { success: true }
   }),
+
+  /**
+   * Update user's RM user ID
+   */
+  updateRMUserId: protectedProcedure
+    .input(
+      z.object({
+        rmUserId: z.number().int().positive().nullable(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      await prisma.user.update({
+        where: { id: ctx.user.id },
+        data: { rmUserId: input.rmUserId },
+      })
+
+      return { success: true }
+    }),
 
   /**
    * Initiate Google OAuth flow

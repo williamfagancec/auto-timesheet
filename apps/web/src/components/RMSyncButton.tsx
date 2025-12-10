@@ -1,6 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { format, endOfWeek } from 'date-fns'
 import { trpc } from '../lib/trpc'
+import type { AppRouter } from '../../../api/src/routers'
+import { inferRouterOutputs } from '@trpc/server'
+
+type RouterOutput = inferRouterOutputs<AppRouter>
 
 interface RMSyncButtonProps {
   weekStart: Date
@@ -18,25 +22,48 @@ export function RMSyncButton({ weekStart, onSyncComplete }: RMSyncButtonProps) {
   // Check if user has RM connection
   const { data: connection } = trpc.rm.connection.get.useQuery()
 
+  useEffect(() => {
+    if (connection) {
+      console.log('[RMSyncButton] RM connection status:', connection ? 'Connected' : 'Not connected')
+    }
+  }, [connection])
+
+
   // Preview sync
-  const { data: preview, isLoading: isLoadingPreview } = trpc.rm.sync.preview.useQuery(
+  const { data: preview, isLoading: isLoadingPreview, error: previewError } = trpc.rm.sync.preview.useQuery(
     { fromDate, toDate },
-    { enabled: showPreview }
+    {
+      enabled: showPreview,
+    }
   )
+
+  useEffect(() => {
+    if (preview) {
+      console.log('[RMSyncButton] Preview data received:', preview)
+    }
+  }, [preview])
+
+  useEffect(() => {
+    if (previewError) {
+      console.error('[RMSyncButton] Preview error:', previewError)
+    }
+  }, [previewError])
+
 
   // Execute sync mutation
   const syncMutation = trpc.rm.sync.execute.useMutation({
-    onSuccess: (result) => {
+    onSuccess: (result: RouterOutput['rm']['sync']['execute']) => {
+      console.log('[RMSyncButton] Sync success:', result)
       // Success handling
       if (result.status === 'COMPLETED') {
         alert(`Successfully synced ${result.entriesSuccess} entries to RM!`)
       } else if (result.status === 'PARTIAL') {
         alert(
           `Partially synced: ${result.entriesSuccess} succeeded, ${result.entriesFailed} failed.\n\n` +
-          `Errors:\n${result.errors.map(e => `- ${e.error}`).join('\n')}`
+          `Errors:\n${result.errors.map((e) => `- ${e.error}`).join('\n')}`
         )
       } else {
-        alert(`Sync failed: ${result.errors.map(e => e.error).join(', ')}`)
+        alert(`Sync failed: ${result.errors.map((e) => e.error).join(', ')}`)
       }
 
       setIsModalOpen(false)
@@ -44,6 +71,7 @@ export function RMSyncButton({ weekStart, onSyncComplete }: RMSyncButtonProps) {
       onSyncComplete?.()
     },
     onError: (error) => {
+      console.error('[RMSyncButton] Sync error:', error)
       alert(`Sync error: ${error.message}`)
     },
   })
@@ -54,13 +82,18 @@ export function RMSyncButton({ weekStart, onSyncComplete }: RMSyncButtonProps) {
   }
 
   const handleOpenPreview = () => {
+    console.log('[RMSyncButton] Opening preview modal', { fromDate, toDate })
     setIsModalOpen(true)
     setShowPreview(true)
   }
 
   const handleExecuteSync = () => {
+    console.log('[RMSyncButton] Execute sync clicked', { fromDate, toDate })
     if (confirm('Sync this week to RM? This will create/update time entries in Resource Management.')) {
+      console.log('[RMSyncButton] User confirmed, executing sync')
       syncMutation.mutate({ fromDate, toDate })
+    } else {
+      console.log('[RMSyncButton] User cancelled')
     }
   }
 
