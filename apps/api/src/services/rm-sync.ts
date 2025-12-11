@@ -290,13 +290,15 @@ export interface SyncExecutionResult {
 /**
  * Preview sync without making API calls
  * Shows what would be created/updated/skipped
+ * @param forceSync - If true, ignores hash comparison and treats all synced entries as needing update
  */
 export async function previewSync(
   userId: string,
   fromDate: Date,
-  toDate: Date
+  toDate: Date,
+  forceSync: boolean = false
 ): Promise<SyncPreviewResult> {
-  console.log('[RM Sync] Preview sync starting:', { userId, fromDate, toDate });
+  console.log('[RM Sync] Preview sync starting:', { userId, fromDate, toDate, forceSync });
 
   // Get user's RM connection
   const connection = await prisma.rMConnection.findUnique({
@@ -421,7 +423,18 @@ export async function previewSync(
       // Calculate current hash
       const currentHash = calculateEntryHash(entry.date, hours, entry.notes);
 
-      if (currentHash === entry.rmSyncedEntry.lastSyncedHash) {
+      // If forceSync is enabled, always update synced entries (bypass hash check)
+      if (forceSync) {
+        preview.toUpdate++;
+        preview.entries.push({
+          timesheetEntryId: entry.id,
+          projectName: entry.project.name,
+          date: entry.date.toISOString().split("T")[0],
+          hours,
+          action: "update",
+          reason: "Force sync enabled",
+        });
+      } else if (currentHash === entry.rmSyncedEntry.lastSyncedHash) {
         preview.toSkip++;
         preview.entries.push({
           timesheetEntryId: entry.id,
@@ -460,12 +473,14 @@ export async function previewSync(
 /**
  * Execute sync for timesheet entries in date range
  * This performs the actual API calls to RM
+ * @param forceSync - If true, ignores hash comparison and always updates/creates entries in RM
  */
 export async function executeSyncEntries(
   userId: string,
   syncLogId: string,
   fromDate: Date,
-  toDate: Date
+  toDate: Date,
+  forceSync: boolean = false
 ): Promise<SyncExecutionResult> {
   // Wrap entire execution in try/catch to ensure we ALWAYS complete the sync
   // This prevents stuck RUNNING syncs when catastrophic errors occur
@@ -600,8 +615,8 @@ export async function executeSyncEntries(
 
       // Check if already synced
       if (entry.rmSyncedEntry) {
-        // Check if content has changed
-        if (currentHash === entry.rmSyncedEntry.lastSyncedHash) {
+        // Check if content has changed (skip hash check if forceSync enabled)
+        if (!forceSync && currentHash === entry.rmSyncedEntry.lastSyncedHash) {
           skipped++;
           attempted--; // Don't count no-change as attempted
           results.push({
@@ -614,35 +629,90 @@ export async function executeSyncEntries(
         }
 
         // Update existing entry in RM
-        const rmEntry = await rmApi.updateTimeEntry(
-          token,
-          rmUserId,
-          entry.rmSyncedEntry.rmEntryId,
-          {
-            assignable_id: mapping.rmProjectId,
-            date: entry.date.toISOString().split("T")[0],
-            hours,
-            notes: entry.notes || undefined,
+        try {
+          const rmEntry = await rmApi.updateTimeEntry(
+            token,
+            rmUserId,
+            entry.rmSyncedEntry.rmEntryId,
+            {
+              assignable_id: mapping.rmProjectId,
+              date: entry.date.toISOString().split("T")[0],
+              hours,
+              notes: entry.notes || undefined,
+            }
+          );
+
+          // Update synced entry record
+          await prisma.rMSyncedEntry.update({
+            where: { id: entry.rmSyncedEntry.id },
+            data: {
+              lastSyncedAt: new Date(),
+              lastSyncedHash: currentHash,
+              syncVersion: { increment: 1 },
+            },
+          });
+
+          success++;
+          results.push({
+            timesheetEntryId: entry.id,
+            status: "success",
+            action: "updated",
+            rmEntryId: rmEntry.id,
+          });
+        } catch (updateError) {
+          // If entry was deleted in RM (404), recreate it
+          if (updateError instanceof RMNotFoundError) {
+            console.log(`[RM Sync] Entry ${entry.rmSyncedEntry.rmEntryId} not found in RM (likely deleted), recreating...`);
+
+            // Delete orphaned sync record
+            await prisma.rMSyncedEntry.delete({
+              where: { id: entry.rmSyncedEntry.id },
+            });
+
+            // Create new entry in RM
+            const newRmEntry = await rmApi.createTimeEntry(
+              token,
+              rmUserId,
+              {
+                assignable_id: mapping.rmProjectId,
+                date: entry.date.toISOString().split("T")[0],
+                hours,
+                notes: entry.notes || undefined,
+              }
+            );
+
+            // Create new synced entry record
+            await prisma.rMSyncedEntry.create({
+              data: {
+                mappingId: mapping.id,
+                timesheetEntryId: entry.id,
+                rmEntryId: newRmEntry.id,
+                lastSyncedAt: new Date(),
+                lastSyncedHash: currentHash,
+                syncVersion: 1,
+              },
+            });
+
+            // Update mapping last synced timestamp
+            await prisma.rMProjectMapping.update({
+              where: { id: mapping.id },
+              data: { lastSyncedAt: new Date() },
+            });
+
+            success++;
+            results.push({
+              timesheetEntryId: entry.id,
+              status: "success",
+              action: "created", // Mark as created since we recreated it
+              rmEntryId: newRmEntry.id,
+            });
+
+            console.log(`[RM Sync] Successfully recreated entry in RM with new ID ${newRmEntry.id}`);
+          } else {
+            // Re-throw other errors to be handled by outer catch
+            throw updateError;
           }
-        );
-
-        // Update synced entry record
-        await prisma.rMSyncedEntry.update({
-          where: { id: entry.rmSyncedEntry.id },
-          data: {
-            lastSyncedAt: new Date(),
-            lastSyncedHash: currentHash,
-            syncVersion: { increment: 1 },
-          },
-        });
-
-        success++;
-        results.push({
-          timesheetEntryId: entry.id,
-          status: "success",
-          action: "updated",
-          rmEntryId: rmEntry.id,
-        });
+        }
       } else {
         // Create new entry in RM
         console.log('[RM Sync] Creating RM entry:', {
@@ -758,26 +828,67 @@ export async function executeSyncEntries(
           const currentHash = calculateEntryHash(entry.date, hours, entry.notes);
 
           if (entry.rmSyncedEntry) {
-            await rmApi.updateTimeEntry(
-              token,
-              rmUserId,
-              entry.rmSyncedEntry.rmEntryId,
-              {
-                assignable_id: mapping.rmProjectId,
-                date: entry.date.toISOString().split("T")[0],
-                hours,
-                notes: entry.notes || undefined,
-              }
-            );
+            try {
+              await rmApi.updateTimeEntry(
+                token,
+                rmUserId,
+                entry.rmSyncedEntry.rmEntryId,
+                {
+                  assignable_id: mapping.rmProjectId,
+                  date: entry.date.toISOString().split("T")[0],
+                  hours,
+                  notes: entry.notes || undefined,
+                }
+              );
 
-            await prisma.rMSyncedEntry.update({
-              where: { id: entry.rmSyncedEntry.id },
-              data: {
-                lastSyncedAt: new Date(),
-                lastSyncedHash: currentHash,
-                syncVersion: { increment: 1 },
-              },
-            });
+              await prisma.rMSyncedEntry.update({
+                where: { id: entry.rmSyncedEntry.id },
+                data: {
+                  lastSyncedAt: new Date(),
+                  lastSyncedHash: currentHash,
+                  syncVersion: { increment: 1 },
+                },
+              });
+            } catch (retryUpdateError) {
+              // If entry was deleted in RM (404), recreate it
+              if (retryUpdateError instanceof RMNotFoundError) {
+                console.log(`[RM Sync] Retry: Entry ${entry.rmSyncedEntry.rmEntryId} not found in RM, recreating...`);
+
+                // Delete orphaned sync record
+                await prisma.rMSyncedEntry.delete({
+                  where: { id: entry.rmSyncedEntry.id },
+                });
+
+                // Create new entry in RM
+                const newRmEntry = await rmApi.createTimeEntry(
+                  token,
+                  rmUserId,
+                  {
+                    assignable_id: mapping.rmProjectId,
+                    date: entry.date.toISOString().split("T")[0],
+                    hours,
+                    notes: entry.notes || undefined,
+                  }
+                );
+
+                // Create new synced entry record
+                await prisma.rMSyncedEntry.create({
+                  data: {
+                    mappingId: mapping.id,
+                    timesheetEntryId: entry.id,
+                    rmEntryId: newRmEntry.id,
+                    lastSyncedAt: new Date(),
+                    lastSyncedHash: currentHash,
+                    syncVersion: 1,
+                  },
+                });
+
+                console.log(`[RM Sync] Retry: Successfully recreated entry with new ID ${newRmEntry.id}`);
+              } else {
+                // Re-throw other errors
+                throw retryUpdateError;
+              }
+            }
           } else {
             const rmEntry = await rmApi.createTimeEntry(
               token,

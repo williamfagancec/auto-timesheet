@@ -488,10 +488,11 @@ pnpm db:seed          # Seed AI test data
      * "Sync to RM" button in timesheet header
      * Opens preview modal showing sync summary
      * Stats dashboard: total entries, to create, to update, to skip
+     * **Force Sync checkbox (2025-12-11):** Bypasses hash comparison, updates all entries even if unchanged - useful for recovering deleted RM entries
      * Unmapped projects warning with link to mapping page
      * Detailed entries table with date, project, hours, action
      * Color-coded action badges (create=green, update=blue, skip=gray)
-     * Confirmation dialog before executing sync
+     * Confirmation dialog before executing sync (different message for force sync)
      * Real-time sync progress indicator
      * Success/failure alerts with detailed error messages
    - **Integration** (`apps/web/src/pages/TimesheetGrid.tsx`)
@@ -505,9 +506,11 @@ pnpm db:seed          # Seed AI test data
    - For each entry:
      * Skips if zero hours
      * Skips if project not mapped to RM
-     * Skips if already synced and content unchanged (hash match)
+     * Skips if already synced and content unchanged (hash match) - unless **Force Sync** enabled
      * Updates if synced but content changed
      * Creates if not synced yet
+     * **Deleted entry recovery:** If UPDATE fails with 404 (entry deleted in RM), automatically deletes orphaned sync record and recreates entry in RM
+   - **Force Sync Mode (2025-12-11):** Optional checkbox in UI bypasses hash comparison and always updates synced entries, useful for recovering entries deleted in RM
    - 100ms delay between API calls to avoid rate limits
    - Rate limit retry: waits 2 seconds, retries once
    - Not found errors: automatically disables invalid project mappings
@@ -656,13 +659,37 @@ apps/web/src/pages/TimesheetGrid.tsx     [MODIFIED] Added RMSyncButton integrati
    - Reconnect to RM
    - Verify button reappears
 
+7. **Test Deleted Entry Recovery (2025-12-11):**
+
+   **Method 1: Automatic recovery (when entry changed locally)**
+   - Sync an entry to RM
+   - Manually delete the entry in RM
+   - Edit the entry in time-tracker (change hours or notes)
+   - Sync again (normal sync, not force sync)
+   - Verify entry is recreated in RM with new ID
+   - Verify sync shows "created" action, not "failed"
+   - Verify subsequent syncs work normally
+
+   **Method 2: Force Sync (when entry unchanged locally)**
+   - Sync an entry to RM
+   - Manually delete the entry in RM
+   - Open sync modal and check "Force Sync" checkbox
+   - Preview should show "Update" action with reason "Force sync enabled"
+   - Execute sync
+   - Verify entry is recreated in RM
+   - Verify sync succeeds
+   - Verify subsequent syncs work normally
+
 **Expected Behavior:**
 - ✅ Preview shows accurate counts
 - ✅ Unmapped projects clearly identified
 - ✅ Sync creates new RM entries
 - ✅ Sync updates changed entries
-- ✅ Sync skips unchanged entries
+- ✅ Sync skips unchanged entries (unless Force Sync enabled)
 - ✅ Sync skips zero-hour entries
+- ✅ Deleted entries automatically recreated in RM (2025-12-11)
+- ✅ Force Sync checkbox bypasses hash comparison (2025-12-11)
+- ✅ Force Sync recovers deleted RM entries without local changes (2025-12-11)
 - ✅ Rate limits handled gracefully
 - ✅ Errors shown with clear messages
 - ✅ Grid refreshes after sync
