@@ -32,6 +32,7 @@
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.3.3",
+    "@trpc/server": "^11.0.0",
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
     "@typescript-eslint/eslint-plugin": "^6.18.0",

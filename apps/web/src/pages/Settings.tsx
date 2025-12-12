@@ -4,6 +4,10 @@ import { trpc } from '../lib/trpc'
 export function Settings() {
   const [apiToken, setApiToken] = useState('')
   const [showToken, setShowToken] = useState(false)
+  const [rmUserId, setRmUserId] = useState('')
+
+  // Fetch current user info
+  const { data: authStatus } = trpc.auth.status.useQuery()
 
   // Fetch current RM connection
   const {
@@ -34,6 +38,17 @@ export function Settings() {
     },
   })
 
+  // Update RM user ID mutation
+  const updateRmUserIdMutation = trpc.auth.updateRMUserId.useMutation({
+    onSuccess: () => {
+      alert('RM user ID updated successfully!')
+      setRmUserId('')
+    },
+    onError: (error) => {
+      alert(`Failed to update RM user ID: ${error.message}`)
+    },
+  })
+
   const handleConnect = () => {
     if (!apiToken.trim()) {
       alert('Please enter your RM API token')
@@ -55,6 +70,16 @@ export function Settings() {
     deleteMutation.mutate()
   }
 
+  const handleUpdateRmUserId = () => {
+    const userId = parseInt(rmUserId.trim())
+    if (!rmUserId.trim() || isNaN(userId) || userId <= 0) {
+      alert('Please enter a valid RM user ID (positive number)')
+      return
+    }
+
+    updateRmUserIdMutation.mutate({ rmUserId: userId })
+  }
+
   if (isLoading) {
     return (
       <div className="max-w-4xl mx-auto">
@@ -72,6 +97,62 @@ export function Settings() {
       <div className="mb-xl">
         <h1 className="text-2xl font-semibold text-text-primary">Settings</h1>
         <p className="mt-xs text-sm text-text-secondary">Manage your integrations and preferences</p>
+      </div>
+
+      {/* User Settings Section */}
+      <div className="bg-white rounded-lg border border-border-light shadow-sm overflow-hidden mb-6">
+        <div className="bg-sandy px-xl py-lg border-b border-border-light">
+          <h2 className="text-xl font-semibold text-text-primary">
+            Your Profile
+          </h2>
+          <p className="mt-xs text-sm text-text-secondary">
+            Configure your personal information for RM sync
+          </p>
+        </div>
+        <div className="p-xl">
+          <div className="space-y-4">
+            {authStatus?.user?.rmUserId && (
+              <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                <p className="text-sm text-green-800">
+                  <span className="font-medium">Current RM User ID:</span> {authStatus.user.rmUserId}
+                </p>
+                <p className="text-xs text-green-700 mt-1">
+                  Time entries will be synced to this RM user
+                </p>
+              </div>
+            )}
+
+            <div>
+              <label
+                htmlFor="rm-user-id"
+                className="block text-sm font-medium text-gray-700 mb-2"
+              >
+                RM User ID
+              </label>
+              <p className="text-xs text-gray-600 mb-2">
+                This is your user ID in Resource Management. Find it by going to Settings → My Profile in RM.
+              </p>
+              <div className="flex gap-3">
+                <input
+                  id="rm-user-id"
+                  type="number"
+                  value={rmUserId}
+                  onChange={(e) => setRmUserId(e.target.value)}
+                  placeholder={authStatus?.user?.rmUserId?.toString() || "Enter your RM user ID"}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  disabled={updateRmUserIdMutation.isPending}
+                />
+                <button
+                  onClick={handleUpdateRmUserId}
+                  disabled={updateRmUserIdMutation.isPending || !rmUserId.trim()}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {updateRmUserIdMutation.isPending ? 'Updating...' : 'Update'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* RM Integration Section */}

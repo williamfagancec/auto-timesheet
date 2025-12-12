@@ -53,7 +53,8 @@
       "Bash(timeout 10 pnpm dev:web:*)",
       "Bash(tail:*)",
       "Bash(timeout 10 psql:*)",
-      "Bash(timeout 3 tail:*)"
+      "Bash(timeout 3 tail:*)",
+      "Bash(pkill:*)"
     ],
     "deny": [],
     "ask": []

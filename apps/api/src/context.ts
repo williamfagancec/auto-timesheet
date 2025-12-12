@@ -11,12 +11,12 @@ export async function createContext({ req, res }: CreateFastifyContextOptions) {
   // Extract session ID from cookie
   const sessionId = req.cookies[lucia.sessionCookieName] ?? null
 
-  console.log('[Context] Session cookie check:', {
-    url: req.url,
-    cookieName: lucia.sessionCookieName,
-    sessionId: sessionId ? sessionId.substring(0, 20) + '...' : null,
-    allCookies: Object.keys(req.cookies),
-  })
+  // console.log('[Context] Session cookie check:', {
+  //   url: req.url,
+  //   cookieName: lucia.sessionCookieName,
+  //   sessionId: sessionId ? sessionId.substring(0, 20) + '...' : null,
+  //   allCookies: Object.keys(req.cookies),
+  // })
 
   let user: User | null = null
   let session: Session | null = null
@@ -26,11 +26,11 @@ export async function createContext({ req, res }: CreateFastifyContextOptions) {
     session = result.session
     user = result.user
 
-    console.log('[Context] Session validation result:', {
-      hasSession: !!session,
-      hasUser: !!user,
-      userId: user?.id,
-    })
+    // console.log('[Context] Session validation result:', {
+    //   hasSession: !!session,
+    //   hasUser: !!user,
+    //   userId: user?.id,
+    // })
 
     // Create new session cookie if session was refreshed
     if (session && session.fresh) {
@@ -68,21 +68,21 @@ export async function createContext({ req, res }: CreateFastifyContextOptions) {
 
             // Skip refresh if no connection (user hasn't connected calendar yet)
             if (!connection) {
-              console.log(`[Context] Skipping token refresh for user ${userId}: no calendar connection`)
+              // console.log(`[Context] Skipping token refresh for user ${userId}: no calendar connection`)
               return
             }
 
             // Skip refresh if token is fresh (expires more than 10 minutes from now)
             // This avoids refreshing tokens that were just issued during OAuth
             if (connection.expiresAt && !isTokenExpired(connection.expiresAt, 10)) {
-              console.log(`[Context] Skipping token refresh for user ${userId}: token is still fresh (expires at ${connection.expiresAt.toISOString()})`)
+              // console.log(`[Context] Skipping token refresh for user ${userId}: token is still fresh (expires at ${connection.expiresAt.toISOString()})`)
               return
             }
 
             // Token is expired or expiring soon - refresh it
-            console.log(`[Context] Token needs refresh for user ${userId}, refreshing...`)
+            // console.log(`[Context] Token needs refresh for user ${userId}, refreshing...`)
             await getValidAccessToken(userId, 'google')
-            console.log(`[Context] Successfully refreshed tokens for user ${userId}`)
+            // console.log(`[Context] Successfully refreshed tokens for user ${userId}`)
           } catch (error: any) {
             // Catch and log ALL errors - never let background refresh break the request
             // This includes CALENDAR_NOT_CONNECTED, token decryption errors, network errors, etc.

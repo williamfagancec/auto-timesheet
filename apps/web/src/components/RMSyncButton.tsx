@@ -1,6 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { format, endOfWeek } from 'date-fns'
 import { trpc } from '../lib/trpc'
+import type { AppRouter } from '../../../api/src/routers'
+import { inferRouterOutputs } from '@trpc/server'
+
+type RouterOutput = inferRouterOutputs<AppRouter>
 
 interface RMSyncButtonProps {
   weekStart: Date
@@ -10,6 +14,7 @@ interface RMSyncButtonProps {
 export function RMSyncButton({ weekStart, onSyncComplete }: RMSyncButtonProps) {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
+  const [forceSync, setForceSync] = useState(false)
 
   const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 })
   const fromDate = format(weekStart, 'yyyy-MM-dd')
@@ -18,32 +23,57 @@ export function RMSyncButton({ weekStart, onSyncComplete }: RMSyncButtonProps) {
   // Check if user has RM connection
   const { data: connection } = trpc.rm.connection.get.useQuery()
 
+  useEffect(() => {
+    if (connection) {
+      console.log('[RMSyncButton] RM connection status:', connection ? 'Connected' : 'Not connected')
+    }
+  }, [connection])
+
+
   // Preview sync
-  const { data: preview, isLoading: isLoadingPreview } = trpc.rm.sync.preview.useQuery(
-    { fromDate, toDate },
-    { enabled: showPreview }
+  const { data: preview, isLoading: isLoadingPreview, error: previewError } = trpc.rm.sync.preview.useQuery(
+    { fromDate, toDate, forceSync },
+    {
+      enabled: showPreview,
+    }
   )
+
+  useEffect(() => {
+    if (preview) {
+      console.log('[RMSyncButton] Preview data received:', preview)
+    }
+  }, [preview])
+
+  useEffect(() => {
+    if (previewError) {
+      console.error('[RMSyncButton] Preview error:', previewError)
+    }
+  }, [previewError])
+
 
   // Execute sync mutation
   const syncMutation = trpc.rm.sync.execute.useMutation({
-    onSuccess: (result) => {
+    onSuccess: (result: RouterOutput['rm']['sync']['execute']) => {
+      console.log('[RMSyncButton] Sync success:', result)
       // Success handling
       if (result.status === 'COMPLETED') {
         alert(`Successfully synced ${result.entriesSuccess} entries to RM!`)
       } else if (result.status === 'PARTIAL') {
         alert(
           `Partially synced: ${result.entriesSuccess} succeeded, ${result.entriesFailed} failed.\n\n` +
-          `Errors:\n${result.errors.map(e => `- ${e.error}`).join('\n')}`
+          `Errors:\n${result.errors.map((e) => `- ${e.error}`).join('\n')}`
         )
       } else {
-        alert(`Sync failed: ${result.errors.map(e => e.error).join(', ')}`)
+        alert(`Sync failed: ${result.errors.map((e) => e.error).join(', ')}`)
       }
 
       setIsModalOpen(false)
       setShowPreview(false)
+      setForceSync(false) // Reset force sync checkbox
       onSyncComplete?.()
     },
     onError: (error) => {
+      console.error('[RMSyncButton] Sync error:', error)
       alert(`Sync error: ${error.message}`)
     },
   })
@@ -54,13 +84,23 @@ export function RMSyncButton({ weekStart, onSyncComplete }: RMSyncButtonProps) {
   }
 
   const handleOpenPreview = () => {
+    console.log('[RMSyncButton] Opening preview modal', { fromDate, toDate })
     setIsModalOpen(true)
     setShowPreview(true)
+    setForceSync(false) // Reset force sync checkbox
   }
 
   const handleExecuteSync = () => {
-    if (confirm('Sync this week to RM? This will create/update time entries in Resource Management.')) {
-      syncMutation.mutate({ fromDate, toDate })
+    console.log('[RMSyncButton] Execute sync clicked', { fromDate, toDate, forceSync })
+    const confirmMessage = forceSync
+      ? 'Force sync this week to RM? This will update ALL entries, even if they haven\'t changed.'
+      : 'Sync this week to RM? This will create/update time entries in Resource Management.'
+
+    if (confirm(confirmMessage)) {
+      console.log('[RMSyncButton] User confirmed, executing sync')
+      syncMutation.mutate({ fromDate, toDate, forceSync })
+    } else {
+      console.log('[RMSyncButton] User cancelled')
     }
   }
 
@@ -110,6 +150,27 @@ export function RMSyncButton({ weekStart, onSyncComplete }: RMSyncButtonProps) {
                       <p className="text-lg font-semibold text-gray-600">{preview.toSkip}</p>
                     </div>
                   </div>
+                </div>
+
+                {/* Force Sync Checkbox */}
+                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={forceSync}
+                      onChange={(e) => setForceSync(e.target.checked)}
+                      className="mt-1"
+                    />
+                    <div>
+                      <div className="font-semibold text-blue-900">
+                        Force Sync (Ignore unchanged entries)
+                      </div>
+                      <div className="text-sm text-blue-700 mt-1">
+                        When enabled, all synced entries will be updated in RM, even if they haven't changed.
+                        Use this if entries were deleted in RM and need to be recreated.
+                      </div>
+                    </div>
+                  </label>
                 </div>
 
                 {/* Unmapped Projects Warning */}
@@ -184,6 +245,7 @@ export function RMSyncButton({ weekStart, onSyncComplete }: RMSyncButtonProps) {
                     onClick={() => {
                       setIsModalOpen(false)
                       setShowPreview(false)
+                      setForceSync(false) // Reset force sync checkbox
                     }}
                     className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
                     disabled={syncMutation.isPending}

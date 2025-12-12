@@ -39,11 +39,13 @@ const DeleteMappingInput = z.object({
 const PreviewSyncInput = z.object({
   fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format (YYYY-MM-DD)"),
   toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format (YYYY-MM-DD)"),
+  forceSync: z.boolean().optional().default(false),
 });
 
 const ExecuteSyncInput = z.object({
   fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format (YYYY-MM-DD)"),
   toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format (YYYY-MM-DD)"),
+  forceSync: z.boolean().optional().default(false),
 });
 
 /**
@@ -568,6 +570,7 @@ export const rmRouter = router({
     preview: protectedProcedure
       .input(PreviewSyncInput)
       .query(async ({ ctx, input }) => {
+        console.log('[RM Router] Preview sync requested:', { userId: ctx.user.id, fromDate: input.fromDate, toDate: input.toDate, forceSync: input.forceSync });
         try {
           const fromDate = new Date(input.fromDate + "T00:00:00.000Z");
           const toDate = new Date(input.toDate + "T23:59:59.999Z");
@@ -575,11 +578,14 @@ export const rmRouter = router({
           const preview = await RMSync.previewSync(
             ctx.user.id,
             fromDate,
-            toDate
+            toDate,
+            input.forceSync
           );
 
+          console.log('[RM Router] Preview sync result:', { totalEntries: preview.totalEntries, toCreate: preview.toCreate, toUpdate: preview.toUpdate, toSkip: preview.toSkip });
           return preview;
         } catch (error) {
+          console.error('[RM Router] Preview sync error:', error);
           if (error instanceof RMSync.RMSyncError) {
             throw new TRPCError({
               code: error.code === "NO_CONNECTION" ? "NOT_FOUND" : "BAD_REQUEST",
@@ -604,23 +610,28 @@ export const rmRouter = router({
     execute: protectedProcedure
       .input(ExecuteSyncInput)
       .mutation(async ({ ctx, input }) => {
+        console.log('[RM Router] Execute sync requested:', { userId: ctx.user.id, fromDate: input.fromDate, toDate: input.toDate, forceSync: input.forceSync });
         try {
           const fromDate = new Date(input.fromDate + "T00:00:00.000Z");
           const toDate = new Date(input.toDate + "T23:59:59.999Z");
 
           // Start the sync (creates RUNNING log)
           const { syncLogId } = await RMSync.startSync(ctx.user.id);
+          console.log('[RM Router] Sync started:', syncLogId);
 
           // Execute the sync entries
           const result = await RMSync.executeSyncEntries(
             ctx.user.id,
             syncLogId,
             fromDate,
-            toDate
+            toDate,
+            input.forceSync
           );
 
+          console.log('[RM Router] Sync completed:', { status: result.status, attempted: result.entriesAttempted, success: result.entriesSuccess, failed: result.entriesFailed });
           return result;
         } catch (error) {
+          console.error('[RM Router] Execute sync error:', error);
           if (error instanceof RMSync.RMSyncError) {
             const codeMap: Record<RMSync.RMSyncError["code"], "NOT_FOUND" | "CONFLICT" | "BAD_REQUEST"> = {
               NO_CONNECTION: "NOT_FOUND",
