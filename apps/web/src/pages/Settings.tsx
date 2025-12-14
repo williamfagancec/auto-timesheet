@@ -44,7 +44,7 @@ export function Settings() {
       alert('RM user ID updated successfully!')
       setRmUserId('')
     },
-    onError: (error) => {
+    onError: (error: any) => {
       alert(`Failed to update RM user ID: ${error.message}`)
     },
   })

@@ -19,7 +19,7 @@ import crypto from "crypto";
 export class RMSyncError extends Error {
   constructor(
     message: string,
-    public code: "SYNC_IN_PROGRESS" | "NO_CONNECTION" | "SYNC_FAILED" | "INVALID_STATE"
+    public code: "SYNC_IN_PROGRESS" | "NO_CONNECTION" | "SYNC_FAILED" | "INVALID_STATE" | "NO_RM_USER_ID"
   ) {
     super(message);
     this.name = "RMSyncError";
@@ -623,7 +623,7 @@ export async function executeSyncEntries(
             timesheetEntryId: entry.id,
             status: "skipped",
             action: "no_change",
-            rmEntryId: entry.rmSyncedEntry.rmEntryId,
+            rmEntryId: Number(entry.rmSyncedEntry.rmEntryId),
           });
           continue;
         }
@@ -633,7 +633,7 @@ export async function executeSyncEntries(
           const rmEntry = await rmApi.updateTimeEntry(
             token,
             rmUserId,
-            entry.rmSyncedEntry.rmEntryId,
+            Number(entry.rmSyncedEntry.rmEntryId),
             {
               assignable_id: mapping.rmProjectId,
               date: entry.date.toISOString().split("T")[0],
@@ -808,14 +808,9 @@ export async function executeSyncEntries(
 
       let errorMessage = "Unknown error";
       if (error instanceof Error) {
-        // Create a serializable object from the error, including non-enumerable properties
-        const errorObj: Record<string, unknown> = {};
-        for (const key of Object.getOwnPropertyNames(error)) {
-            errorObj[key] = (error as any)[key];
-        }
-        errorMessage = JSON.stringify(errorObj, null, 2);
+       errorMessage = error.message;
       } else {
-        errorMessage = JSON.stringify(error, null, 2);
+        errorMessage = String(error);
       }
 
       // Special handling for specific errors
@@ -832,7 +827,7 @@ export async function executeSyncEntries(
               await rmApi.updateTimeEntry(
                 token,
                 rmUserId,
-                entry.rmSyncedEntry.rmEntryId,
+                Number(entry.rmSyncedEntry.rmEntryId),
                 {
                   assignable_id: mapping.rmProjectId,
                   date: entry.date.toISOString().split("T")[0],

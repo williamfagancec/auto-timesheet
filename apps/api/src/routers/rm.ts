@@ -638,6 +638,7 @@ export const rmRouter = router({
               SYNC_IN_PROGRESS: "CONFLICT",
               SYNC_FAILED: "BAD_REQUEST",
               INVALID_STATE: "BAD_REQUEST",
+              NO_RM_USER_ID: "BAD_REQUEST",
             };
 
             throw new TRPCError({

@@ -23,6 +23,7 @@ export const lucia = new Lucia(adapter, {
     return {
       email: attributes.email,
       name: attributes.name,
+      rmUserId: attributes.rmUserId,
     };
   },
 });
@@ -38,4 +39,5 @@ declare module "lucia" {
 interface DatabaseUserAttributes {
   email: string;
   name: string | null;
+  rmUserId: number | null;
 }

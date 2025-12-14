@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "esnext",
+    "lib": ["ES2022"],
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "types": ["node"]
+  },
+  "include": [
+    "*.ts",
+    "setup-rm-service-account.ts",
+    "check-rm-connection.ts",
+    "cleanup-stuck-sync.ts",
+    "delete-rm-connection.ts",
+    "force-reconnect.ts",
+    "check-timesheet-entries.ts"
+  ],
+  "exclude": ["node_modules", "apps", "packages", "dist"]
+}
