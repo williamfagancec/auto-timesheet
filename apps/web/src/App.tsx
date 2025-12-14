@@ -12,7 +12,7 @@ import { Test } from './pages/Test'
 import { Debug } from './pages/Debug'
 import { Events } from './pages/Events'
 import { Timesheet } from './pages/Timesheet'
-import { TimesheetSimple } from './pages/TimesheetSimple'
+
 import { Projects } from './pages/Projects'
 import { Settings } from './pages/Settings'
 import { RMProjectMapping } from './pages/RMProjectMapping'

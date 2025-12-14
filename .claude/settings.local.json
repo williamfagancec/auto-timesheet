@@ -54,7 +54,6 @@
       "Bash(tail:*)",
       "Bash(timeout 10 psql:*)",
       "Bash(timeout 3 tail:*)",
-      "Bash(pkill:*)",
       "Bash(ls:*)"
     ],
     "deny": [],
