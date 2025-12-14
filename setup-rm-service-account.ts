@@ -9,10 +9,24 @@ try {
 
   // Step 1: Get Raj's API token from user
   const rajToken = process.argv[2]
+  const williamRmUserId = process.argv[3]
+
   if (!rajToken) {
     console.error('❌ Please provide Raj\'s RM API token as an argument')
     console.log('\nUsage: npx tsx setup-rm-service-account.ts <RM_API_TOKEN> <RM_USER_ID>')
     console.log('\nGet your token from: https://app.rm.smartsheet.com → Settings → Developer API')
+    process.exit(1)
+  }
+
+  if (!williamRmUserId) {
+    console.error('❌ Please provide the RM user ID as the second argument')
+    console.log('nUsage: npx tsx setup-rm-service=account.ts <RM_API_TOKEN> <RM_USER_ID>')
+    process.exit(1)
+  }
+
+  const parsedRMUserID = Number.parseInt(williamRmUserId)
+  if (Number.isNaN(parsedRMUserID) || parsedRMUserID <= 0) {
+    console.error('❌ Invalid RM user ID Must be a positive number.')
     process.exit(1)
   }
 
