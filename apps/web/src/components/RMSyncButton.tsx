@@ -78,9 +78,18 @@ export function RMSyncButton({ weekStart, onSyncComplete }: RMSyncButtonProps) {
     },
   })
 
+  // Must call all hooks before early returns (Rules of Hooks)
+  const utils = trpc.useUtils()
+
   // Don't show button if no RM connection
   if (!connection) {
     return null
+  }
+
+  const handleForceSyncChange = (checked: boolean) => {
+    setForceSync(checked)
+    // Invalidate preview to refetch with new forceSync value
+    utils.rm.sync.preview.invalidate()
   }
 
   const handleOpenPreview = () => {
@@ -158,7 +167,7 @@ export function RMSyncButton({ weekStart, onSyncComplete }: RMSyncButtonProps) {
                     <input
                       type="checkbox"
                       checked={forceSync}
-                      onChange={(e) => setForceSync(e.target.checked)}
+                      onChange={(e) => handleForceSyncChange(e.target.checked)}
                       className="mt-1"
                     />
                     <div>

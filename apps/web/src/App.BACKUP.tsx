@@ -1,33 +1,54 @@
-import { useState } from 'react'
+// BACKUP of original App.tsx - saved before debugging
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { trpc } from './lib/trpc'
-import { httpBatchLink } from '@trpc/client'
-
-// Import pages
+import { useState, useEffect } from 'react'
+import { httpBatchLink, TRPCClientError } from '@trpc/client'
 import { Login } from './pages/Login'
 import { Signup } from './pages/Signup'
 import { AuthCallback } from './pages/AuthCallback'
-import { Test } from './pages/Test'
-import { Debug } from './pages/Debug'
 import { Events } from './pages/Events'
 import { Timesheet } from './pages/Timesheet'
-import { TimesheetSimple } from './pages/TimesheetSimple'
 import { Projects } from './pages/Projects'
 import { Settings } from './pages/Settings'
 import { RMProjectMapping } from './pages/RMProjectMapping'
-import { NotFound } from './pages/NotFound'
+import { Test } from './pages/Test'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { Layout } from './components/Layout'
+import { useInactivityTimeout } from './hooks/useInactivityTimeout'
+
+// Global error handler for session invalidation
+let sessionInvalidatedCallback: (() => void) | null = null
 
 function App() {
-  console.log('[App] Rendering App component')
-
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {
-        retry: 1,
-        staleTime: 5 * 60 * 1000,
+        retry: (failureCount, error) => {
+          // Don't retry on session invalidation errors
+          if (error instanceof TRPCClientError) {
+            if (error.message.includes('SESSION_INVALIDATED')) {
+              return false
+            }
+          }
+          return failureCount < 3
+        },
+      },
+      mutations: {
+        retry: false,
+        onError: (error) => {
+          // Check for session invalidation errors
+          if (error instanceof TRPCClientError) {
+            if (error.message.includes('SESSION_INVALIDATED')) {
+              // Clear all queries
+              queryClient.clear()
+              // Call the callback to redirect to login
+              if (sessionInvalidatedCallback) {
+                sessionInvalidatedCallback()
+              }
+            }
+          }
+        },
       },
     },
   }))
@@ -36,9 +57,12 @@ function App() {
     trpc.createClient({
       links: [
         httpBatchLink({
+          // In development: Use relative URL to leverage Vite proxy
+          // In production: Use absolute URL from environment variable
           url: import.meta.env.VITE_API_URL
             ? `${import.meta.env.VITE_API_URL}/trpc`
             : '/trpc',
+          // Include credentials for cross-origin requests (production)
           fetch(url, options) {
             return fetch(url, {
               ...options,
@@ -54,15 +78,13 @@ function App() {
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
+          <SessionInvalidationHandler />
           <Routes>
-            {/* Public routes */}
             <Route path="/test" element={<Test />} />
-            <Route path="/debug" element={<Debug />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
 
-            {/* Protected routes */}
             <Route
               path="/events"
               element={
@@ -84,9 +106,6 @@ function App() {
                 </ProtectedRoute>
               }
             />
-
-            {/* Redirect /timesheets (plural) to /timesheet (singular) */}
-            <Route path="/timesheets" element={<Navigate to="/timesheet" replace />} />
 
             <Route
               path="/projects"
@@ -121,16 +140,40 @@ function App() {
               }
             />
 
-            {/* Default redirect */}
-            <Route path="/" element={<Navigate to="/login" replace />} />
-
-            {/* 404 catch-all route */}
-            <Route path="*" element={<NotFound />} />
+            <Route path="/" element={<Navigate to="/timesheet" replace />} />
           </Routes>
         </BrowserRouter>
       </QueryClientProvider>
     </trpc.Provider>
   )
+}
+
+// Component to handle session invalidation redirects and inactivity timeout
+function SessionInvalidationHandler() {
+  const navigate = useNavigate()
+  const { data: authStatus } = trpc.auth.status.useQuery()
+  const isAuthenticated = authStatus?.authenticated ?? false
+
+  // Set up inactivity timeout for authenticated users
+  useInactivityTimeout(isAuthenticated)
+
+  useEffect(() => {
+    // Set up the global callback
+    sessionInvalidatedCallback = () => {
+      console.log('[Session] Session invalidated - redirecting to login')
+      // Show alert to user
+      alert('Your session has expired. Please log in again to continue.')
+      // Redirect to login
+      navigate('/login', { replace: true })
+    }
+
+    // Cleanup
+    return () => {
+      sessionInvalidatedCallback = null
+    }
+  }, [navigate])
+
+  return null
 }
 
 export default App

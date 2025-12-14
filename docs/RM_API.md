@@ -109,26 +109,43 @@ model RMSyncedEntry {
 ### RMSyncLog Model
 ```prisma
 model RMSyncLog {
-  id              String        @id @default(cuid())
-  connectionId    String
-  status          RMSyncStatus  // RUNNING, COMPLETED, PARTIAL, FAILED
-  fromDate        DateTime
-  toDate          DateTime
-  entriesAttempted Int          @default(0)
-  entriesSuccess   Int          @default(0)
-  entriesFailed    Int          @default(0)
-  entriesSkipped   Int          @default(0)
-  errorMessage     String?
-  errorDetails     Json?
-  startedAt        DateTime     @default(now())
+  id               String         @id @default(cuid())
+  connectionId     String
+
+  // Sync job details
+  jobId            String?        // BullMQ job ID (future)
+  status           RMSyncStatus
+  direction        RMSyncDirection  // PUSH (time-tracker → RM)
+
+  // Stats
+  entriesAttempted Int            @default(0)
+  entriesSuccess   Int            @default(0)
+  entriesFailed    Int            @default(0)
+  entriesSkipped   Int            @default(0)
+
+  // Error tracking
+  errorMessage     String?        @db.Text
+  errorDetails     Json?          // Detailed error info for debugging
+
+  startedAt        DateTime       @default(now())
   completedAt      DateTime?
 
-  connection      RMConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  connection       RMConnection   @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
-  // Partial unique index - only one RUNNING sync per connection
-  @@unique([connectionId], where: { status: "RUNNING" })
+  @@index([connectionId])
+  @@index([status])
 }
 ```
+
+**Note:** A partial unique index on `(connectionId) WHERE status='RUNNING'` prevents concurrent syncs. This is created via raw SQL migration (not Prisma schema syntax):
+
+```sql
+CREATE UNIQUE INDEX "RMSyncLog_connection_running_unique"
+ON "RMSyncLog"("connectionId")
+WHERE status = 'RUNNING';
+```
+
+See migration: `packages/database/prisma/migrations/20251116_rm_sync_running_constraint/migration.sql`
 
 ---
 
@@ -156,13 +173,12 @@ model RMSyncLog {
 
 3. **Run Setup Script:**
    ```bash
-   cd apps/api
-   npx tsx ../../setup-rm-service-account.ts "YOUR_RM_TOKEN" YOUR_RM_USER_ID
+   npx tsx setup-rm-service-account.ts "YOUR_RM_TOKEN" YOUR_RM_USER_ID
    ```
 
    Example:
    ```bash
-   npx tsx ../../setup-rm-service-account.ts "abc123xyz" 1030131
+   npx tsx setup-rm-service-account.ts "abc123xyz" 1030131
    ```
 
    This script:

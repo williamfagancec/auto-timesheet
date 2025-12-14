@@ -48,6 +48,7 @@ async function checkRMConnection() {
     await prisma.$disconnect()
   } catch (error) {
     console.error('Error checking RM connection:', error)
+    await prisma.$disconnect()
     process.exit(1)
   }
 }

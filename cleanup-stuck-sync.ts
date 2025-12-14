@@ -2,7 +2,17 @@ import { prisma } from './packages/database/index.js'
 
 async function cleanupStuckSync() {
   try {
-    const userId = 'cmhl38lcq0000c1pjg9lhseul' // Your user ID
+    // Get user ID from command line argument
+    const userId = process.argv[2]
+
+    if (!userId) {
+      console.error('❌ Error: User ID is required')
+      console.log('')
+      console.log('Usage: npx tsx cleanup-stuck-sync.ts <userId>')
+      console.log('')
+      console.log('Example: npx tsx cleanup-stuck-sync.ts cmhl38lcq0000c1pjg9lhseul')
+      process.exit(1)
+    }
 
     // Find RM connection
     const connection = await prisma.rMConnection.findUnique({
@@ -50,6 +60,7 @@ async function cleanupStuckSync() {
     await prisma.$disconnect()
   } catch (error) {
     console.error('Error cleaning up stuck sync:', error)
+    await prisma.$disconnect()
     process.exit(1)
   }
 }

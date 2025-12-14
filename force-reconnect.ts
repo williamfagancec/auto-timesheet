@@ -15,10 +15,11 @@ async function forceReconnect() {
     const user = await prisma.user.findFirst()
     console.log('✅ Connection successful!', user ? `Found user: ${user.email}` : 'No users found')
 
-    await prisma.$disconnect()
   } catch (error) {
     console.error('Error:', error)
     process.exit(1)
+  } finally {
+    await prisma.$disconnect()
   }
 }
 

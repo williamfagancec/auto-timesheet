@@ -12,11 +12,14 @@ export const prisma = global.prisma || new PrismaClient({
         { level: 'error', emit: 'stdout' }
       ]
     : ['error'],
-  datasources: {
-    db: {
-      url: process.env.DATABASE_URL + (process.env.DATABASE_URL?.includes('?') ? '&' : '?') + 'pgbouncer=true',
+
+  ...(process.env.DATABASE_URL && process.env.NODE_ENV === 'production' ? {
+    datasources: {
+      db: {
+        url: process.env.DATABASE_URL + (process.env.DATABASE_URL.includes('?') ? '&' : '?') + 'pgbouncer=true',
+      },
     },
-  },
+  } : {}),
 })
 
 // Log slow queries in development (>100ms)
