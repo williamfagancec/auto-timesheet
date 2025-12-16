@@ -208,7 +208,9 @@ export function RMSyncButton({ weekStart, onSyncComplete }: RMSyncButtonProps) {
                 {/* Entries List */}
                 {preview.entries.length > 0 && (
                   <div className="mb-6">
-                    <h3 className="font-semibold mb-2">Entries ({preview.entries.length})</h3>
+                    <h3 className="font-semibold mb-2">
+                      Aggregated Entries ({preview.entries.length} project-days)
+                    </h3>
                     <div className="max-h-64 overflow-y-auto border rounded">
                       <table className="w-full text-sm">
                         <thead className="bg-gray-50 sticky top-0">
@@ -216,6 +218,8 @@ export function RMSyncButton({ weekStart, onSyncComplete }: RMSyncButtonProps) {
                             <th className="px-3 py-2 text-left">Date</th>
                             <th className="px-3 py-2 text-left">Project</th>
                             <th className="px-3 py-2 text-right">Hours</th>
+                            <th className="px-3 py-2 text-center">Billable</th>
+                            <th className="px-3 py-2 text-center">Components</th>
                             <th className="px-3 py-2 text-left">Action</th>
                           </tr>
                         </thead>
@@ -224,7 +228,28 @@ export function RMSyncButton({ weekStart, onSyncComplete }: RMSyncButtonProps) {
                             <tr key={idx} className="border-t">
                               <td className="px-3 py-2">{entry.date}</td>
                               <td className="px-3 py-2">{entry.projectName}</td>
-                              <td className="px-3 py-2 text-right">{entry.hours}h</td>
+                              <td className="px-3 py-2 text-right font-medium">{entry.hours}h</td>
+                              <td className="px-3 py-2 text-center">
+                                <span
+                                  className={`inline-block px-2 py-1 rounded text-xs font-medium ${
+                                    entry.isBillable
+                                      ? 'bg-green-100 text-green-800'
+                                      : 'bg-orange-100 text-orange-800'
+                                  }`}
+                                  title={entry.isBillable ? 'Billable' : 'Business Development'}
+                                >
+                                  {entry.isBillable ? 'Bill' : 'BD'}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-center text-gray-600">
+                                {entry.componentCount > 1 ? (
+                                  <span className="text-xs" title={`${entry.componentCount} timesheet entries aggregated`}>
+                                    {entry.componentCount} entries
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-gray-400">1 entry</span>
+                                )}
+                              </td>
                               <td className="px-3 py-2">
                                 <span
                                   className={`inline-block px-2 py-1 rounded text-xs ${

@@ -61,7 +61,6 @@ export function TimesheetGrid() {
   const [activeCell, setActiveCell] = useState<ActiveCell | null>(null)
   const [notes, setNotes] = useState<string>('')
   const [isBillable, setIsBillable] = useState<boolean>(true)
-  const [phase, setPhase] = useState<string>('')
 
   // ========== REF-BASED PENDING CHANGES STORE (survives React re-renders) ==========
   const pendingChangesRef = useRef<Map<string, PendingChange>>(new Map())
@@ -80,7 +79,7 @@ export function TimesheetGrid() {
     weekStartDate: weekStart.toISOString(),
   })
 
-  // Fetch user defaults for billable and phase
+  // Fetch user defaults for billable
   const { data: userDefaults } = trpc.project.getDefaults.useQuery(undefined, {
     retry: 1,
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
@@ -151,7 +150,6 @@ export function TimesheetGrid() {
           hours: change.parsedHours,
           notes: activeCell?.projectId === projectId && activeCell?.day === dayKey ? notes : undefined,
           isBillable: activeCell?.projectId === projectId && activeCell?.day === dayKey ? isBillable : undefined,
-          phase: activeCell?.projectId === projectId && activeCell?.day === dayKey ? (phase || undefined) : undefined,
         })
       }
       if (change.status === 'saving') {
@@ -191,7 +189,7 @@ export function TimesheetGrid() {
         }
       }
     })
-  }, [weekStart, updateCellMutation, activeCell, notes, isBillable, phase, utils, triggerRender]);
+  }, [weekStart, updateCellMutation, activeCell, notes, isBillable, utils, triggerRender]);
 
   // Start sync coordinator on mount
   useEffect(() => {
@@ -248,7 +246,6 @@ export function TimesheetGrid() {
           setActiveCell(null)
           setNotes('')
           setIsBillable(userDefaults?.isBillable ?? true)
-          setPhase(userDefaults?.phase ?? '')
         }
       }
     }
@@ -262,14 +259,13 @@ export function TimesheetGrid() {
     // Activate cell and load notes
     setActiveCell({ projectId, day })
 
-    // Load existing notes and billable/phase from the first entry for this project/day
+    // Load existing notes and billable from the first entry for this project/day
     const project = gridData?.projects.find((p) => p.id === projectId)
     const existingNotes = project?.notes[day] || ''
     setNotes(existingNotes)
 
-    // Set billable and phase to user defaults
+    // Set billable to user defaults
     setIsBillable(userDefaults?.isBillable ?? true)
-    setPhase(userDefaults?.phase ?? '')
   }
 
   // Handle input change - write directly to ref store (never lost)
@@ -356,14 +352,13 @@ export function TimesheetGrid() {
     const cellDate = new Date(weekStart)
     cellDate.setDate(cellDate.getDate() + dayIndex)
 
-    // Update with notes, billable, and phase
+    // Update with notes and billable
     updateCellMutation.mutate({
       projectId: activeCell.projectId,
       date: cellDate.toISOString(),
       hours: currentHours,
       notes: notes,
       isBillable: isBillable,
-      phase: phase || undefined,
     })
   }
 
@@ -705,13 +700,6 @@ export function TimesheetGrid() {
               />
               <span className="text-sm text-text-primary">Billable</span>
             </label>
-            <input
-              type="text"
-              placeholder="Phase (optional)"
-              value={phase}
-              onChange={(e) => setPhase(e.target.value)}
-              className="flex-1 px-md py-xs text-sm border border-border-medium rounded-md focus:outline-none focus:border-text-secondary"
-            />
           </div>
 
           {/* Notes Textarea */}
@@ -729,7 +717,6 @@ export function TimesheetGrid() {
                 setActiveCell(null)
                 setNotes('')
                 setIsBillable(userDefaults?.isBillable ?? true)
-                setPhase(userDefaults?.phase ?? '')
               }}
               className="btn-ghost text-sm"
             >

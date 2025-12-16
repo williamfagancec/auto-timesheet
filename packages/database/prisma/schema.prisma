@@ -121,14 +121,13 @@ model TimesheetEntry {
   isSkipped Boolean  @default(false)
   notes     String?
   isBillable Boolean @default(true)
-  phase     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  event         CalendarEvent?  @relation(fields: [eventId], references: [id])
-  project       Project?        @relation(fields: [projectId], references: [id])
-  rmSyncedEntry RMSyncedEntry?
+  user               User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event              CalendarEvent?           @relation(fields: [eventId], references: [id])
+  project            Project?                 @relation(fields: [projectId], references: [id])
+  rmSyncedComponents RMSyncedEntryComponent[]
 
   @@index([userId, date])
 }
@@ -240,25 +239,45 @@ model RMSyncedEntry {
   id                String   @id @default(cuid())
   mappingId         String
 
-  // time-tracker entry
-  timesheetEntryId  String   @unique
-
-  // RM entry details
+  // RM entry details (one RM entry per project-day aggregate)
   rmEntryId         BigInt   // ID returned by RM API (uses BigInt for large IDs)
   rmEntryUrl        String?  // Optional: deep link to RM entry
 
-  // Sync metadata
+  // Aggregation metadata
+  aggregationDate   DateTime // Date for this aggregate (project-day combination)
   lastSyncedAt      DateTime
-  lastSyncedHash    String   // Hash of (date + hours + notes) to detect changes
+  lastSyncedHash    String   // Hash of aggregated data (date + totalHours + isBillable + notes)
   syncVersion       Int      @default(1)  // Increment on each update
 
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  mapping           RMProjectMapping @relation(fields: [mappingId], references: [id], onDelete: Cascade)
-  timesheetEntry    TimesheetEntry   @relation(fields: [timesheetEntryId], references: [id], onDelete: Cascade)
+  mapping           RMProjectMapping         @relation(fields: [mappingId], references: [id], onDelete: Cascade)
+  components        RMSyncedEntryComponent[] // Multiple timesheet entries contributing to this RM entry
 
+  @@unique([mappingId, aggregationDate]) // One RM entry per project-day
   @@index([mappingId])
+  @@index([aggregationDate])
+}
+
+// Junction table tracking which timesheet entries contribute to aggregated RM entry
+model RMSyncedEntryComponent {
+  id                String   @id @default(cuid())
+  rmSyncedEntryId   String   // The aggregated RM entry
+  timesheetEntryId  String   // One of the contributing timesheet entries
+
+  // Contribution metadata (for debugging/auditing)
+  durationMinutes   Int      // Duration this entry contributed
+  isBillable        Boolean  // Billable status of this component
+  notes             String?  // Notes from this component
+
+  createdAt         DateTime @default(now())
+
+  rmSyncedEntry     RMSyncedEntry  @relation(fields: [rmSyncedEntryId], references: [id], onDelete: Cascade)
+  timesheetEntry    TimesheetEntry @relation(fields: [timesheetEntryId], references: [id], onDelete: Cascade)
+
+  @@unique([rmSyncedEntryId, timesheetEntryId]) // Each timesheet entry appears once per aggregate
+  @@index([rmSyncedEntryId])
   @@index([timesheetEntryId])
 }
 
@@ -310,7 +329,6 @@ model UserProjectDefaults {
   id         String   @id @default(cuid())
   userId     String   @unique
   isBillable Boolean  @default(true)
-  phase      String?
   updatedAt  DateTime @updatedAt
   createdAt  DateTime @default(now())
 

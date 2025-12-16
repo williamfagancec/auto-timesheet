@@ -346,31 +346,26 @@ export const projectRouter = router({
         data: {
           userId: ctx.user.id,
           isBillable: true,
-          phase: null,
         },
       })
       return {
         isBillable: newDefaults.isBillable,
-        phase: newDefaults.phase,
       }
     }
 
     return {
       isBillable: defaults.isBillable,
-      phase: defaults.phase,
     }
   }),
 
   /**
    * Update user project defaults
-   * Updates the default billable status only (phase is not stored in defaults)
+   * Updates the default billable status only
    */
   updateDefaults: protectedProcedure
     .input(
       z.object({
         isBillable: z.boolean().optional(),
-        // Phase is intentionally NOT included - it should never be saved to user defaults
-        // Phase should remain event-specific and not use defaults
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -379,11 +374,9 @@ export const projectRouter = router({
         create: {
           userId: ctx.user.id,
           isBillable: input.isBillable ?? true,
-          phase: null, // Always null - phase should never be saved to defaults
         },
         update: {
           ...(input.isBillable !== undefined && { isBillable: input.isBillable }),
-          // Phase is NOT updated - it should always remain null
         },
       })
 

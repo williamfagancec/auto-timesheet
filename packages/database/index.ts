@@ -4,6 +4,9 @@ declare global {
   var prisma: PrismaClient | undefined
 }
 
+const databaseUrl = process.env.DATABASE_URL;
+const isProduction = process.env.NODE_ENV === 'production';
+
 export const prisma = global.prisma || new PrismaClient({
   log: process.env.NODE_ENV === 'development'
     ? [
@@ -13,10 +16,10 @@ export const prisma = global.prisma || new PrismaClient({
       ]
     : ['error'],
 
-  ...(process.env.DATABASE_URL && process.env.NODE_ENV === 'production' ? {
+    ...(databaseUrl && isProduction ? {
     datasources: {
       db: {
-        url: process.env.DATABASE_URL + (process.env.DATABASE_URL.includes('?') ? '&' : '?') + 'pgbouncer=true',
+        url: databaseUrl + (databaseUrl.includes('?') ? '&' : '?') + 'pgbouncer=true',
       },
     },
   } : {}),

@@ -68,7 +68,7 @@ export function Events() {
     },
   })
 
-  // Fetch user defaults for billable and phase (only when authenticated)
+  // Fetch user defaults for billable (only when authenticated)
   const { data: userDefaults } = trpc.project.getDefaults.useQuery(undefined, {
     retry: 1,
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
@@ -83,27 +83,21 @@ export function Events() {
     },
   })
 
-  // State for billable and phase per event
+  // State for billable per event
   const [eventBillable, setEventBillable] = useState<Record<string, boolean>>({})
-  const [eventPhase, setEventPhase] = useState<Record<string, string>>({})
 
   // Initialize state from existing events when they load
   useEffect(() => {
     if (events.length > 0) {
       const billableMap: Record<string, boolean> = {}
-      const phaseMap: Record<string, string> = {}
-      
+
       events.forEach((event: any) => {
         if (event.isBillable !== undefined) {
           billableMap[event.id] = event.isBillable
         }
-        if (event.phase) {
-          phaseMap[event.id] = event.phase
-        }
       })
-      
+
       setEventBillable((prev) => ({ ...prev, ...billableMap }))
-      setEventPhase((prev) => ({ ...prev, ...phaseMap }))
     }
   }, [events])
 
@@ -134,9 +128,7 @@ export function Events() {
 
   const handleProjectSelect = (eventId: string, projectId: string) => {
     // Get billable for this event (use defaults if not set)
-    // Phase should NOT use defaults - only use if explicitly set for this event
     const isBillable = eventBillable[eventId] ?? userDefaults?.isBillable ?? true
-    const phase = eventPhase[eventId] ?? null
 
     // Auto-save immediately when project is selected
     categorizeSingleMutation.mutate({
@@ -144,20 +136,14 @@ export function Events() {
         eventId,
         projectId,
         isBillable,
-        phase: phase || undefined,
       }]
     })
 
     // Note: Billable defaults are updated in the backend when entries are saved
-    // Phase is NOT saved to user defaults - it should remain event-specific
   }
 
   const handleBillableChange = (eventId: string, isBillable: boolean) => {
     setEventBillable((prev) => ({ ...prev, [eventId]: isBillable }))
-  }
-
-  const handlePhaseChange = (eventId: string, phase: string) => {
-    setEventPhase((prev) => ({ ...prev, [eventId]: phase }))
   }
 
   const handleSkip = (eventId: string) => {
@@ -586,7 +572,6 @@ export function Events() {
                                             eventId: event.id,
                                             projectId: event.projectId,
                                             isBillable: e.target.checked,
-                                            phase: eventPhase[event.id] || undefined,
                                           }]
                                         })
                                       }
@@ -595,28 +580,6 @@ export function Events() {
                                   />
                                   <span className="text-text-primary">Billable</span>
                                 </label>
-                                <input
-                                  type="text"
-                                  placeholder="Phase (optional)"
-                                  value={eventPhase[event.id] ?? ''}
-                                  onChange={(e) => {
-                                    handlePhaseChange(event.id, e.target.value)
-                                  }}
-                                  onBlur={() => {
-                                    // Auto-save on blur if project is already selected
-                                    if (event.projectId) {
-                                      categorizeSingleMutation.mutate({
-                                        entries: [{
-                                          eventId: event.id,
-                                          projectId: event.projectId,
-                                          isBillable: eventBillable[event.id] ?? userDefaults?.isBillable ?? true,
-                                          phase: eventPhase[event.id] || undefined,
-                                        }]
-                                      })
-                                    }
-                                  }}
-                                  className="flex-1 px-sm py-xs text-sm border border-border-medium rounded-md focus:outline-none focus:border-text-secondary"
-                                />
                               </div>
                             )}
                           </div>
