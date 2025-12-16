@@ -228,7 +228,6 @@ export const calendarRouter = router({
         projectName: event.entry?.project?.name,
         projectId: event.entry?.projectId,
         isBillable: event.entry?.isBillable ?? true,
-        phase: event.entry?.phase ?? null,
       }))
     }),
 

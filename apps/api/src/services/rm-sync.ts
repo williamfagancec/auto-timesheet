@@ -11,7 +11,10 @@ import { prisma } from "database";
 import { Prisma, RMSyncStatus, RMSyncDirection } from "@prisma/client";
 import { rmApi, RMRateLimitError, RMNotFoundError } from "./rm-api.js";
 import { getDecryptedToken } from "./rm-connection.js";
-import crypto from "crypto";
+import {
+  aggregateEntriesByProjectDay,
+  mapBillableToTask,
+} from "./rm-aggregation.js";
 
 /**
  * Custom error for sync-related issues
@@ -227,22 +230,10 @@ export async function cancelStuckSync(syncLogId: string, reason: string): Promis
   console.log(`[RM Sync] Cancelled stuck sync ${syncLogId}: ${reason}`);
 }
 
-/**
- * Calculate hash for change detection
- * Hash includes: date + hours + notes to detect content changes
- */
-function calculateEntryHash(date: Date, hours: number, notes: string | null): string {
-  const dateStr = date.toISOString().split("T")[0]; // YYYY-MM-DD
-  const content = `${dateStr}|${hours}|${notes || ""}`;
-  return crypto.createHash("sha256").update(content).digest("hex");
-}
-
-/**
- * Convert minutes to decimal hours (rounded to 2 decimal places)
- */
-function minutesToDecimalHours(minutes: number): number {
-  return Math.round((minutes / 60) * 100) / 100;
-}
+// NOTE: calculateEntryHash and minutesToDecimalHours have been moved to rm-aggregation.ts
+// and are now imported from there. These functions are kept here for backward compatibility
+// during migration period, but should be removed once all code is updated.
+// The old single-entry hash function is no longer used - we now use calculateAggregateHash.
 
 /**
  * Single entry sync result
@@ -257,20 +248,24 @@ interface EntrySyncResult {
 
 /**
  * Sync preview result (dry-run mode)
+ * Shows aggregated entries (one per project-day)
  */
 export interface SyncPreviewResult {
-  totalEntries: number;
+  totalEntries: number; // Total aggregated entries (not individual entries)
   toCreate: number;
   toUpdate: number;
   toSkip: number;
   unmappedProjects: Array<{ projectId: string; projectName: string }>;
   entries: Array<{
-    timesheetEntryId: string;
+    timesheetEntryIds: string[]; // IDs of contributing timesheet entries
     projectName: string;
     date: string;
-    hours: number;
+    hours: number; // Aggregated total hours
+    isBillable: boolean; // Billable status for the aggregate
+    notes: string | null; // Combined notes
     action: "create" | "update" | "skip";
     reason?: string;
+    componentCount: number; // Number of entries in this aggregate
   }>;
 }
 
@@ -289,7 +284,7 @@ export interface SyncExecutionResult {
 
 /**
  * Preview sync without making API calls
- * Shows what would be created/updated/skipped
+ * Shows what would be created/updated/skipped (aggregated by project-day)
  * @param forceSync - If true, ignores hash comparison and treats all synced entries as needing update
  */
 export async function previewSync(
@@ -347,7 +342,6 @@ export async function previewSync(
     },
     include: {
       project: true,
-      rmSyncedEntry: true,
     },
     orderBy: {
       date: "asc",
@@ -356,8 +350,12 @@ export async function previewSync(
 
   console.log('[RM Sync] Found timesheet entries:', entries.length);
 
+  // Aggregate entries by project-day
+  const aggregates = aggregateEntriesByProjectDay(entries);
+  console.log('[RM Sync] Created aggregates:', aggregates.size);
+
   const preview: SyncPreviewResult = {
-    totalEntries: entries.length,
+    totalEntries: aggregates.size, // Total number of aggregated entries (project-days)
     toCreate: 0,
     toUpdate: 0,
     toSkip: 0,
@@ -367,102 +365,120 @@ export async function previewSync(
 
   const unmappedProjectIds = new Set<string>();
 
-  for (const entry of entries) {
-    if (!entry.projectId || !entry.project) {
-      preview.toSkip++;
-      preview.entries.push({
-        timesheetEntryId: entry.id,
-        projectName: "No Project",
-        date: entry.date.toISOString().split("T")[0],
-        hours: minutesToDecimalHours(entry.duration),
-        action: "skip",
-        reason: "No project assigned",
-      });
-      continue;
-    }
+  // For each aggregate, check if it needs to be synced
+  for (const aggregate of aggregates.values()) {
+    const projectId = aggregate.projectId;
+    const dateStr = aggregate.date.toISOString().split("T")[0];
+
+    // Get project name
+    const project = entries.find(e => e.projectId === projectId)?.project;
+    const projectName = project?.name || "Unknown Project";
 
     // Check if hours are zero
-    const hours = minutesToDecimalHours(entry.duration);
-    if (hours === 0) {
+    if (aggregate.totalHours === 0) {
       preview.toSkip++;
       preview.entries.push({
-        timesheetEntryId: entry.id,
-        projectName: entry.project.name,
-        date: entry.date.toISOString().split("T")[0],
-        hours,
+        timesheetEntryIds: aggregate.contributingEntryIds,
+        projectName,
+        date: dateStr,
+        hours: aggregate.totalHours,
+        isBillable: aggregate.isBillable,
+        notes: aggregate.notes,
         action: "skip",
         reason: "Zero hours",
+        componentCount: aggregate.contributingEntries.length,
       });
       continue;
     }
 
     // Check if project is mapped
-    const mapping = mappingByProjectId.get(entry.projectId);
+    const mapping = mappingByProjectId.get(projectId);
     if (!mapping) {
-      if (!unmappedProjectIds.has(entry.projectId)) {
-        unmappedProjectIds.add(entry.projectId);
+      if (!unmappedProjectIds.has(projectId)) {
+        unmappedProjectIds.add(projectId);
         preview.unmappedProjects.push({
-          projectId: entry.projectId,
-          projectName: entry.project.name,
+          projectId,
+          projectName,
         });
       }
       preview.toSkip++;
       preview.entries.push({
-        timesheetEntryId: entry.id,
-        projectName: entry.project.name,
-        date: entry.date.toISOString().split("T")[0],
-        hours,
+        timesheetEntryIds: aggregate.contributingEntryIds,
+        projectName,
+        date: dateStr,
+        hours: aggregate.totalHours,
+        isBillable: aggregate.isBillable,
+        notes: aggregate.notes,
         action: "skip",
         reason: "Project not mapped to RM",
+        componentCount: aggregate.contributingEntries.length,
       });
       continue;
     }
 
-    // Check if already synced
-    if (entry.rmSyncedEntry) {
-      // Calculate current hash
-      const currentHash = calculateEntryHash(entry.date, hours, entry.notes);
+    // Check if aggregate already synced (find RMSyncedEntry by mappingId + aggregationDate)
+    const existingSyncedEntry = await prisma.rMSyncedEntry.findUnique({
+      where: {
+        mappingId_aggregationDate: {
+          mappingId: mapping.id,
+          aggregationDate: aggregate.date,
+        },
+      },
+    });
 
+    if (existingSyncedEntry) {
       // If forceSync is enabled, always update synced entries (bypass hash check)
       if (forceSync) {
         preview.toUpdate++;
         preview.entries.push({
-          timesheetEntryId: entry.id,
-          projectName: entry.project.name,
-          date: entry.date.toISOString().split("T")[0],
-          hours,
+          timesheetEntryIds: aggregate.contributingEntryIds,
+          projectName,
+          date: dateStr,
+          hours: aggregate.totalHours,
+          isBillable: aggregate.isBillable,
+          notes: aggregate.notes,
           action: "update",
           reason: "Force sync enabled",
+          componentCount: aggregate.contributingEntries.length,
         });
-      } else if (currentHash === entry.rmSyncedEntry.lastSyncedHash) {
+      } else if (aggregate.aggregateHash === existingSyncedEntry.lastSyncedHash) {
         preview.toSkip++;
         preview.entries.push({
-          timesheetEntryId: entry.id,
-          projectName: entry.project.name,
-          date: entry.date.toISOString().split("T")[0],
-          hours,
+          timesheetEntryIds: aggregate.contributingEntryIds,
+          projectName,
+          date: dateStr,
+          hours: aggregate.totalHours,
+          isBillable: aggregate.isBillable,
+          notes: aggregate.notes,
           action: "skip",
           reason: "Already synced, no changes",
+          componentCount: aggregate.contributingEntries.length,
         });
       } else {
         preview.toUpdate++;
         preview.entries.push({
-          timesheetEntryId: entry.id,
-          projectName: entry.project.name,
-          date: entry.date.toISOString().split("T")[0],
-          hours,
+          timesheetEntryIds: aggregate.contributingEntryIds,
+          projectName,
+          date: dateStr,
+          hours: aggregate.totalHours,
+          isBillable: aggregate.isBillable,
+          notes: aggregate.notes,
           action: "update",
           reason: "Content changed since last sync",
+          componentCount: aggregate.contributingEntries.length,
         });
       }
     } else {
       preview.toCreate++;
       preview.entries.push({
-        timesheetEntryId: entry.id,
-        projectName: entry.project.name,
-        date: entry.date.toISOString().split("T")[0],
-        hours,
+        timesheetEntryIds: aggregate.contributingEntryIds,
+        projectName,
+        date: dateStr,
+        hours: aggregate.totalHours,
+        isBillable: aggregate.isBillable,
+        notes: aggregate.notes,
         action: "create",
+        componentCount: aggregate.contributingEntries.length,
       });
     }
   }
@@ -471,8 +487,8 @@ export async function previewSync(
 }
 
 /**
- * Execute sync for timesheet entries in date range
- * This performs the actual API calls to RM
+ * Execute sync for timesheet entries in date range (using aggregation)
+ * This performs the actual API calls to RM, syncing one aggregated entry per project-day
  * @param forceSync - If true, ignores hash comparison and always updates/creates entries in RM
  */
 export async function executeSyncEntries(
@@ -544,7 +560,7 @@ export async function executeSyncEntries(
     mappings.map((m) => [m.projectId, m])
   );
 
-  // Get timesheet entries in date range
+  // Get timesheet entries in date range (no rmSyncedEntry include needed)
   const entries = await prisma.timesheetEntry.findMany({
     where: {
       userId,
@@ -557,13 +573,16 @@ export async function executeSyncEntries(
       },
       isSkipped: false,
     },
-    include: {
-      rmSyncedEntry: true,
-    },
     orderBy: {
       date: "asc",
     },
   });
+
+  console.log('[RM Sync] Found timesheet entries:', entries.length);
+
+  // Aggregate entries by project-day
+  const aggregates = aggregateEntriesByProjectDay(entries);
+  console.log('[RM Sync] Created aggregates:', aggregates.size);
 
   const results: EntrySyncResult[] = [];
   let attempted = 0;
@@ -571,224 +590,189 @@ export async function executeSyncEntries(
   let failed = 0;
   let skipped = 0;
 
-  // Process each entry
-  for (const entry of entries) {
-    if (!entry.projectId) {
-      skipped++;
-      results.push({
-        timesheetEntryId: entry.id,
-        status: "skipped",
-        error: "No project assigned",
-      });
-      continue;
-    }
+  // Process each aggregate
+  for (const aggregate of aggregates.values()) {
+    const projectId = aggregate.projectId;
+    const dateStr = aggregate.date.toISOString().split("T")[0];
 
     // Check if hours are zero
-    const hours = minutesToDecimalHours(entry.duration);
-    if (hours === 0) {
+    if (aggregate.totalHours === 0) {
       skipped++;
-      results.push({
-        timesheetEntryId: entry.id,
-        status: "skipped",
-        error: "Zero hours",
-      });
+      for (const entryId of aggregate.contributingEntryIds) {
+        results.push({
+          timesheetEntryId: entryId,
+          status: "skipped",
+          error: "Zero hours",
+        });
+      }
       continue;
     }
 
     // Check if project is mapped
-    const mapping = mappingByProjectId.get(entry.projectId);
+    const mapping = mappingByProjectId.get(projectId);
     if (!mapping) {
       skipped++;
-      results.push({
-        timesheetEntryId: entry.id,
-        status: "skipped",
-        error: "Project not mapped to RM",
-      });
+      for (const entryId of aggregate.contributingEntryIds) {
+        results.push({
+          timesheetEntryId: entryId,
+          status: "skipped",
+          error: "Project not mapped to RM",
+        });
+      }
       continue;
     }
 
     attempted++;
 
     try {
-      // Calculate current hash
-      const currentHash = calculateEntryHash(entry.date, hours, entry.notes);
+      // Check if aggregate already synced (find by mappingId + aggregationDate)
+      const existingSyncedEntry = await prisma.rMSyncedEntry.findUnique({
+        where: {
+          mappingId_aggregationDate: {
+            mappingId: mapping.id,
+            aggregationDate: aggregate.date,
+          },
+        },
+      });
 
-      // Check if already synced
-      if (entry.rmSyncedEntry) {
-        // Check if content has changed (skip hash check if forceSync enabled)
-        if (!forceSync && currentHash === entry.rmSyncedEntry.lastSyncedHash) {
-          skipped++;
-          attempted--; // Don't count no-change as attempted
+      // Determine if we need to sync
+      const needsSync = !existingSyncedEntry ||
+                        forceSync ||
+                        aggregate.aggregateHash !== existingSyncedEntry.lastSyncedHash;
+
+      if (existingSyncedEntry && !needsSync) {
+        // Skip - no changes
+        skipped++;
+        attempted--; // Don't count no-change as attempted
+        for (const entryId of aggregate.contributingEntryIds) {
           results.push({
-            timesheetEntryId: entry.id,
+            timesheetEntryId: entryId,
             status: "skipped",
             action: "no_change",
-            rmEntryId: Number(entry.rmSyncedEntry.rmEntryId),
+            rmEntryId: Number(existingSyncedEntry.rmEntryId),
           });
-          continue;
         }
+        continue;
+      }
 
+      // Prepare RM API payload with billable status
+      const rmPayload = {
+        assignable_id: mapping.rmProjectId,
+        date: dateStr,
+        hours: aggregate.totalHours,
+        notes: aggregate.notes || undefined,
+        task: mapBillableToTask(aggregate.isBillable), // Map boolean to task string
+      };
+
+      let rmEntry;
+      let action: "created" | "updated";
+
+      if (existingSyncedEntry) {
         // Update existing entry in RM
+        console.log('[RM Sync] Updating RM entry:', {
+          rmEntryId: existingSyncedEntry.rmEntryId,
+          ...rmPayload,
+        });
+
         try {
-          const rmEntry = await rmApi.updateTimeEntry(
+          rmEntry = await rmApi.updateTimeEntry(
             token,
             rmUserId,
-            Number(entry.rmSyncedEntry.rmEntryId),
-            {
-              assignable_id: mapping.rmProjectId,
-              date: entry.date.toISOString().split("T")[0],
-              hours,
-              notes: entry.notes || undefined,
-            }
+            Number(existingSyncedEntry.rmEntryId),
+            rmPayload
           );
-
-          // Update synced entry record
-          await prisma.rMSyncedEntry.update({
-            where: { id: entry.rmSyncedEntry.id },
-            data: {
-              lastSyncedAt: new Date(),
-              lastSyncedHash: currentHash,
-              syncVersion: { increment: 1 },
-            },
-          });
-
-          success++;
-          results.push({
-            timesheetEntryId: entry.id,
-            status: "success",
-            action: "updated",
-            rmEntryId: rmEntry.id,
-          });
+          action = "updated";
         } catch (updateError) {
           // If entry was deleted in RM (404), recreate it
           if (updateError instanceof RMNotFoundError) {
-            console.log(`[RM Sync] Entry ${entry.rmSyncedEntry.rmEntryId} not found in RM (likely deleted), recreating...`);
+            console.log(`[RM Sync] Entry ${existingSyncedEntry.rmEntryId} not found in RM (likely deleted), recreating...`);
 
-            // Delete orphaned sync record
+            // Delete orphaned sync record and components
             await prisma.rMSyncedEntry.delete({
-              where: { id: entry.rmSyncedEntry.id },
+              where: { id: existingSyncedEntry.id },
             });
 
             // Create new entry in RM
-            const newRmEntry = await rmApi.createTimeEntry(
-              token,
-              rmUserId,
-              {
-                assignable_id: mapping.rmProjectId,
-                date: entry.date.toISOString().split("T")[0],
-                hours,
-                notes: entry.notes || undefined,
-              }
-            );
-
-            // Create new synced entry record
-            await prisma.rMSyncedEntry.create({
-              data: {
-                mappingId: mapping.id,
-                timesheetEntryId: entry.id,
-                rmEntryId: newRmEntry.id,
-                lastSyncedAt: new Date(),
-                lastSyncedHash: currentHash,
-                syncVersion: 1,
-              },
-            });
-
-            // Update mapping last synced timestamp
-            await prisma.rMProjectMapping.update({
-              where: { id: mapping.id },
-              data: { lastSyncedAt: new Date() },
-            });
-
-            success++;
-            results.push({
-              timesheetEntryId: entry.id,
-              status: "success",
-              action: "created", // Mark as created since we recreated it
-              rmEntryId: newRmEntry.id,
-            });
-
-            console.log(`[RM Sync] Successfully recreated entry in RM with new ID ${newRmEntry.id}`);
+            rmEntry = await rmApi.createTimeEntry(token, rmUserId, rmPayload);
+            action = "created";
+            console.log(`[RM Sync] Successfully recreated entry in RM with new ID ${rmEntry.id}`);
           } else {
-            // Re-throw other errors to be handled by outer catch
+            // Re-throw other errors
             throw updateError;
           }
         }
+
+        // Update synced entry record
+        await prisma.rMSyncedEntry.update({
+          where: { id: existingSyncedEntry.id },
+          data: {
+            rmEntryId: rmEntry.id,
+            lastSyncedAt: new Date(),
+            lastSyncedHash: aggregate.aggregateHash,
+            syncVersion: { increment: 1 },
+          },
+        });
+
+        // Delete old component records
+        await prisma.rMSyncedEntryComponent.deleteMany({
+          where: { rmSyncedEntryId: existingSyncedEntry.id },
+        });
+
+        // Create new component records
+        await prisma.rMSyncedEntryComponent.createMany({
+          data: aggregate.contributingEntries.map(entry => ({
+            rmSyncedEntryId: existingSyncedEntry.id,
+            timesheetEntryId: entry.id,
+            durationMinutes: entry.duration,
+            isBillable: entry.isBillable,
+            notes: entry.notes,
+          })),
+        });
       } else {
         // Create new entry in RM
-        console.log('[RM Sync] Creating RM entry:', {
-          userId: connection.rmUserId,
-          projectId: mapping.rmProjectId,
-          date: entry.date.toISOString().split("T")[0],
-          hours,
-          timesheetEntryId: entry.id,
-        });
+        console.log('[RM Sync] Creating RM entry:', rmPayload);
 
-        const rmEntry = await rmApi.createTimeEntry(
-          token,
-          rmUserId,
-          {
-            assignable_id: mapping.rmProjectId,
-            date: entry.date.toISOString().split("T")[0],
-            hours,
-            notes: entry.notes || undefined,
-          }
-        );
+        rmEntry = await rmApi.createTimeEntry(token, rmUserId, rmPayload);
+        action = "created";
 
-        console.log('[RM Sync] RM entry created:', { rmEntryId: rmEntry.id, rmEntry });
+        console.log('[RM Sync] RM entry created:', { rmEntryId: rmEntry.id });
 
         // Create synced entry record
-        console.log('[RM Sync] Creating RMSyncedEntry record:', {
-          mappingId: mapping.id,
-          timesheetEntryId: entry.id,
-          rmEntryId: rmEntry.id,
-          rmEntryType: typeof rmEntry.id,
+        const newSyncedEntry = await prisma.rMSyncedEntry.create({
+          data: {
+            mappingId: mapping.id,
+            aggregationDate: aggregate.date,
+            rmEntryId: rmEntry.id,
+            lastSyncedAt: new Date(),
+            lastSyncedHash: aggregate.aggregateHash,
+            syncVersion: 1,
+          },
         });
 
-        try {
-          await prisma.rMSyncedEntry.create({
-            data: {
-              mappingId: mapping.id,
-              timesheetEntryId: entry.id,
-              rmEntryId: rmEntry.id,
-              lastSyncedAt: new Date(),
-              lastSyncedHash: currentHash,
-              syncVersion: 1,
-            },
-          });
-        } catch (dbError) {
-          if (dbError instanceof Prisma.PrismaClientKnownRequestError && dbError.code === 'P2002') {
-            console.warn(`[RM Sync] Attempted to create a duplicate RMSyncedEntry for timesheetEntryId ${entry.id}. This may indicate a duplicate entry was created in RM. Recovering by updating the existing record.`);
-            // The record already exists. This can happen if a previous sync failed after creating the RM entry but before creating the local one.
-            // We'll update the existing record with the new RM entry details. This is safer than failing the sync.
-            await prisma.rMSyncedEntry.update({
-              where: { timesheetEntryId: entry.id },
-              data: {
-                rmEntryId: rmEntry.id, // The new one we just created in RM
-                lastSyncedAt: new Date(),
-                lastSyncedHash: currentHash,
-                syncVersion: { increment: 1 },
-                mappingId: mapping.id,
-              },
-            });
-          } else {
-            // Re-throw other database errors
-            throw dbError;
-          }
-        }
-
-        console.log('[RM Sync] RMSyncedEntry created successfully');
-
-        // Update mapping last synced timestamp
-        await prisma.rMProjectMapping.update({
-          where: { id: mapping.id },
-          data: { lastSyncedAt: new Date() },
+        // Create component records
+        await prisma.rMSyncedEntryComponent.createMany({
+          data: aggregate.contributingEntries.map(entry => ({
+            rmSyncedEntryId: newSyncedEntry.id,
+            timesheetEntryId: entry.id,
+            durationMinutes: entry.duration,
+            isBillable: entry.isBillable,
+            notes: entry.notes,
+          })),
         });
+      }
 
-        success++;
+      // Update mapping last synced timestamp
+      await prisma.rMProjectMapping.update({
+        where: { id: mapping.id },
+        data: { lastSyncedAt: new Date() },
+      });
+
+      success++;
+      for (const entryId of aggregate.contributingEntryIds) {
         results.push({
-          timesheetEntryId: entry.id,
+          timesheetEntryId: entryId,
           status: "success",
-          action: "created",
+          action,
           rmEntryId: rmEntry.id,
         });
       }
@@ -798,12 +782,12 @@ export async function executeSyncEntries(
     } catch (error) {
       failed++;
 
-      console.error('[RM Sync] Error syncing entry:', {
-        timesheetEntryId: entry.id,
-        projectId: entry.projectId,
+      console.error('[RM Sync] Error syncing aggregate:', {
+        projectId,
+        date: dateStr,
+        contributingEntries: aggregate.contributingEntryIds.length,
         error: error instanceof Error ? error.message : String(error),
         errorStack: error instanceof Error ? error.stack : undefined,
-        errorDetails: error,
       });
 
       let errorMessage = "Unknown error";
@@ -820,110 +804,86 @@ export async function executeSyncEntries(
 
         try {
           // Retry the operation
-          const currentHash = calculateEntryHash(entry.date, hours, entry.notes);
+          const existingSyncedEntry = await prisma.rMSyncedEntry.findUnique({
+            where: {
+              mappingId_aggregationDate: {
+                mappingId: mapping.id,
+                aggregationDate: aggregate.date,
+              },
+            },
+          });
 
-          if (entry.rmSyncedEntry) {
-            try {
-              await rmApi.updateTimeEntry(
-                token,
-                rmUserId,
-                Number(entry.rmSyncedEntry.rmEntryId),
-                {
-                  assignable_id: mapping.rmProjectId,
-                  date: entry.date.toISOString().split("T")[0],
-                  hours,
-                  notes: entry.notes || undefined,
-                }
-              );
+          const rmPayload = {
+            assignable_id: mapping.rmProjectId,
+            date: dateStr,
+            hours: aggregate.totalHours,
+            notes: aggregate.notes || undefined,
+            task: mapBillableToTask(aggregate.isBillable),
+          };
 
-              await prisma.rMSyncedEntry.update({
-                where: { id: entry.rmSyncedEntry.id },
-                data: {
-                  lastSyncedAt: new Date(),
-                  lastSyncedHash: currentHash,
-                  syncVersion: { increment: 1 },
-                },
-              });
-            } catch (retryUpdateError) {
-              // If entry was deleted in RM (404), recreate it
-              if (retryUpdateError instanceof RMNotFoundError) {
-                console.log(`[RM Sync] Retry: Entry ${entry.rmSyncedEntry.rmEntryId} not found in RM, recreating...`);
-
-                // Delete orphaned sync record
-                await prisma.rMSyncedEntry.delete({
-                  where: { id: entry.rmSyncedEntry.id },
-                });
-
-                // Create new entry in RM
-                const newRmEntry = await rmApi.createTimeEntry(
-                  token,
-                  rmUserId,
-                  {
-                    assignable_id: mapping.rmProjectId,
-                    date: entry.date.toISOString().split("T")[0],
-                    hours,
-                    notes: entry.notes || undefined,
-                  }
-                );
-
-                // Create new synced entry record
-                await prisma.rMSyncedEntry.create({
-                  data: {
-                    mappingId: mapping.id,
-                    timesheetEntryId: entry.id,
-                    rmEntryId: newRmEntry.id,
-                    lastSyncedAt: new Date(),
-                    lastSyncedHash: currentHash,
-                    syncVersion: 1,
-                  },
-                });
-
-                console.log(`[RM Sync] Retry: Successfully recreated entry with new ID ${newRmEntry.id}`);
-              } else {
-                // Re-throw other errors
-                throw retryUpdateError;
-              }
-            }
-          } else {
-            const rmEntry = await rmApi.createTimeEntry(
+          let rmEntry;
+          if (existingSyncedEntry) {
+            rmEntry = await rmApi.updateTimeEntry(
               token,
-              connection.rmUserId,
-              {
-                assignable_id: mapping.rmProjectId,
-                date: entry.date.toISOString().split("T")[0],
-                hours,
-                notes: entry.notes || undefined,
-              }
+              rmUserId,
+              Number(existingSyncedEntry.rmEntryId),
+              rmPayload
             );
 
-            await prisma.rMSyncedEntry.create({
+            await prisma.rMSyncedEntry.update({
+              where: { id: existingSyncedEntry.id },
+              data: {
+                lastSyncedAt: new Date(),
+                lastSyncedHash: aggregate.aggregateHash,
+                syncVersion: { increment: 1 },
+              },
+            });
+          } else {
+            rmEntry = await rmApi.createTimeEntry(token, rmUserId, rmPayload);
+
+            const newSyncedEntry = await prisma.rMSyncedEntry.create({
               data: {
                 mappingId: mapping.id,
-                timesheetEntryId: entry.id,
+                aggregationDate: aggregate.date,
                 rmEntryId: rmEntry.id,
                 lastSyncedAt: new Date(),
-                lastSyncedHash: currentHash,
+                lastSyncedHash: aggregate.aggregateHash,
                 syncVersion: 1,
               },
+            });
+
+            await prisma.rMSyncedEntryComponent.createMany({
+              data: aggregate.contributingEntries.map(entry => ({
+                rmSyncedEntryId: newSyncedEntry.id,
+                timesheetEntryId: entry.id,
+                durationMinutes: entry.duration,
+                isBillable: entry.isBillable,
+                notes: entry.notes,
+              })),
             });
           }
 
           // Retry succeeded
           failed--; // Undo the failed increment
           success++;
-          results.push({
-            timesheetEntryId: entry.id,
-            status: "success",
-            action: entry.rmSyncedEntry ? "updated" : "created",
-          });
+          for (const entryId of aggregate.contributingEntryIds) {
+            results.push({
+              timesheetEntryId: entryId,
+              status: "success",
+              action: existingSyncedEntry ? "updated" : "created",
+              rmEntryId: rmEntry.id,
+            });
+          }
         } catch (retryError) {
           // Retry failed
           errorMessage = `Rate limited, retry failed: ${retryError instanceof Error ? retryError.message : String(retryError)}`;
-          results.push({
-            timesheetEntryId: entry.id,
-            status: "failed",
-            error: errorMessage,
-          });
+          for (const entryId of aggregate.contributingEntryIds) {
+            results.push({
+              timesheetEntryId: entryId,
+              status: "failed",
+              error: errorMessage,
+            });
+          }
         }
       } else if (error instanceof RMNotFoundError) {
         // RM project may have been deleted - mark mapping as disabled
@@ -933,17 +893,21 @@ export async function executeSyncEntries(
         });
 
         errorMessage = "RM project not found - mapping disabled";
-        results.push({
-          timesheetEntryId: entry.id,
-          status: "failed",
-          error: errorMessage,
-        });
+        for (const entryId of aggregate.contributingEntryIds) {
+          results.push({
+            timesheetEntryId: entryId,
+            status: "failed",
+            error: errorMessage,
+          });
+        }
       } else {
-        results.push({
-          timesheetEntryId: entry.id,
-          status: "failed",
-          error: errorMessage,
-        });
+        for (const entryId of aggregate.contributingEntryIds) {
+          results.push({
+            timesheetEntryId: entryId,
+            status: "failed",
+            error: errorMessage,
+          });
+        }
       }
     }
   }
@@ -970,7 +934,7 @@ export async function executeSyncEntries(
       entriesFailed: failed,
       entriesSkipped: skipped,
     },
-    failed > 0 ? `${failed} entries failed to sync` : undefined,
+    failed > 0 ? `${failed} aggregates failed to sync` : undefined,
     failed > 0 ? {
       errors: results
         .filter((r) => r.status === "failed")

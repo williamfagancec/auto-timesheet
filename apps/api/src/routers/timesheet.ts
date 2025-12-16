@@ -17,7 +17,6 @@ async function getOrCreateUserDefaults(tx: any, userId: string) {
       data: {
         userId,
         isBillable: true,
-        phase: null,
       },
     })
   }
@@ -281,7 +280,6 @@ export const timesheetRouter = router({
               projectId: z.string(),
               notes: z.string().optional(),
               isBillable: z.boolean().optional(),
-              phase: z.string().optional(),
             })
           )
           .min(1, 'At least one entry is required')
@@ -345,10 +343,8 @@ export const timesheetRouter = router({
               const durationMs = event.endTime.getTime() - event.startTime.getTime()
               const durationMinutes = Math.round(durationMs / 60000)
 
-              // Use provided values or fall back to user defaults for billable only
-              // Phase should NOT use defaults - it should remain null unless explicitly provided
+              // Use provided values or fall back to user defaults for billable
               const isBillable = entry.isBillable ?? userDefaults.isBillable
-              const phase = entry.phase ?? null
 
               // Check if timesheet entry already exists
               const existingEntry = await tx.timesheetEntry.findUnique({
@@ -385,7 +381,6 @@ export const timesheetRouter = router({
                     notes: entry.notes,
                     isSkipped: false, // Un-skip if it was previously skipped
                     isBillable,
-                    phase,
                   },
                 })
                 updated.push(entry.eventId)
@@ -402,14 +397,12 @@ export const timesheetRouter = router({
                     isSkipped: false,
                     notes: entry.notes,
                     isBillable,
-                    phase,
                   },
                 })
                 created.push(entry.eventId)
               }
 
-              // Update user defaults only for billable (not phase)
-              // Phase should remain event-specific and not be saved to user defaults
+              // Update user defaults for billable
               if (entry.isBillable !== undefined) {
                 await tx.userProjectDefaults.update({
                   where: { userId: ctx.user.id },
@@ -567,7 +560,6 @@ export const timesheetRouter = router({
         hours: z.number().min(0).max(24),
         notes: z.string().max(500).optional(),
         isBillable: z.boolean().optional(),
-        phase: z.string().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -624,10 +616,8 @@ export const timesheetRouter = router({
           // Get user defaults
           const userDefaults = await getOrCreateUserDefaults(tx, ctx.user.id)
 
-          // Use provided values or fall back to user defaults for billable only
-          // Phase should NOT use defaults - it should remain null unless explicitly provided
+          // Use provided values or fall back to user defaults for billable
           const isBillable = input.isBillable ?? userDefaults.isBillable
-          const phase = input.phase ?? null
 
           // Delete all existing manual adjustment entries for this day/project
           await tx.timesheetEntry.deleteMany({
@@ -650,7 +640,6 @@ export const timesheetRouter = router({
                   isManual: true,
                   notes: input.notes,
                   isBillable,
-                  phase,
                 },
               })
             } else if (eventEntries.length === 0) {
@@ -664,36 +653,32 @@ export const timesheetRouter = router({
                   isManual: true,
                   notes: input.notes,
                   isBillable,
-                  phase,
                 },
               })
-            } else if (input.notes || input.isBillable !== undefined || input.phase !== undefined) {
-              // Hours match events but notes/billable/phase provided - update first event entry
+            } else if (input.notes || input.isBillable !== undefined) {
+              // Hours match events but notes/billable provided - update first event entry
               if (eventEntries[0]) {
-                const updateData: { notes?: string; isBillable?: boolean; phase?: string | null } = {}
+                const updateData: { notes?: string; isBillable?: boolean } = {}
                 if (input.notes) updateData.notes = input.notes
                 if (input.isBillable !== undefined) updateData.isBillable = input.isBillable
-                if (input.phase !== undefined) updateData.phase = input.phase || null
                 await tx.timesheetEntry.update({
                   where: { id: eventEntries[0].id },
                   data: updateData,
                 })
               }
             }
-          } else if ((input.notes || input.isBillable !== undefined || input.phase !== undefined) && eventEntries.length > 0) {
-            // Zero hours but notes/billable/phase provided - update first event entry
-            const updateData: { notes?: string; isBillable?: boolean; phase?: string | null } = {}
+          } else if ((input.notes || input.isBillable !== undefined) && eventEntries.length > 0) {
+            // Zero hours but notes/billable provided - update first event entry
+            const updateData: { notes?: string; isBillable?: boolean } = {}
             if (input.notes) updateData.notes = input.notes
             if (input.isBillable !== undefined) updateData.isBillable = input.isBillable
-            if (input.phase !== undefined) updateData.phase = input.phase || null
             await tx.timesheetEntry.update({
               where: { id: eventEntries[0].id },
               data: updateData,
             })
           }
 
-          // Update user defaults only for billable (not phase)
-          // Phase should remain event-specific and not be saved to user defaults
+          // Update user defaults for billable
           if (input.isBillable !== undefined) {
             await tx.userProjectDefaults.update({
               where: { userId: ctx.user.id },
@@ -785,7 +770,6 @@ export const timesheetRouter = router({
         eventIds: z.array(z.string()).min(1).max(100),
         projectId: z.string(),
         isBillable: z.boolean().optional(),
-        phase: z.string().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -828,10 +812,8 @@ export const timesheetRouter = router({
           // Get user defaults
           const userDefaults = await getOrCreateUserDefaults(tx, ctx.user.id)
 
-          // Use provided values or fall back to user defaults for billable only
-          // Phase should NOT use defaults - it should remain null unless explicitly provided
+          // Use provided values or fall back to user defaults for billable
           const isBillable = input.isBillable ?? userDefaults.isBillable
-          const phase = input.phase ?? null
 
           for (const event of events) {
             const durationMinutes = Math.round(
@@ -872,7 +854,6 @@ export const timesheetRouter = router({
                   projectId: input.projectId,
                   isSkipped: false,
                   isBillable,
-                  phase,
                 },
               })
             } else {
@@ -887,14 +868,12 @@ export const timesheetRouter = router({
                   isManual: false,
                   isSkipped: false,
                   isBillable,
-                  phase,
                 },
               })
             }
           }
 
-          // Update user defaults only for billable (not phase)
-          // Phase should remain event-specific and not be saved to user defaults
+          // Update user defaults for billable
           if (input.isBillable !== undefined) {
             await tx.userProjectDefaults.update({
               where: { userId: ctx.user.id },
