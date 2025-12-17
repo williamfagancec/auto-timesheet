@@ -15,6 +15,7 @@ import {
   aggregateEntriesByProjectDay,
   mapBillableToTask,
 } from "./rm-aggregation.js";
+import { timesheetRouter } from "../routers/timesheet.js";
 
 /**
  * Custom error for sync-related issues
@@ -837,6 +838,22 @@ export async function executeSyncEntries(
                 lastSyncedHash: aggregate.aggregateHash,
                 syncVersion: { increment: 1 },
               },
+            });
+
+            // Delete old component records
+            await prisma.rMSyncedEntryComponent.deleteMany({
+              where: { rmSyncedEntryId: existingSyncedEntry.id },
+            });
+
+            // Create new component records
+            await prisma.rMSyncedEntryComponent.createMany({
+              data: aggregate.contributingEntries.map(entry => ({
+                rmSyncedEntryId: existingSyncedEntry.id,
+                timesheetEntryId: entry.id,
+                durationMinutes: entry.duration,
+                isBillable: entry.isBillable,
+                notes: entry.notes,
+              })),
             });
           } else {
             rmEntry = await rmApi.createTimeEntry(token, rmUserId, rmPayload);

@@ -28,7 +28,7 @@ export const projectRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
-      const whereClause: any = {
+      const whereClause: Prisma.ProjectWhereInput = {
         userId: ctx.user.id,
       }
 
