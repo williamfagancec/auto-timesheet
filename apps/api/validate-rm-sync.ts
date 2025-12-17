@@ -103,6 +103,9 @@ async function validateUserIsolation(userId: string) {
     : 'No timesheet entries found for user',
   })
 
+  return true
+}
+
 async function validateAggregation(userId: string) {
   console.log('=== AGGREGATION VALIDATION ===\n')
 
@@ -401,6 +404,7 @@ async function validateJunctionTable(userId: string) {
   })
 
   let totalComponents = 0
+  let junctionFailed = false
   for (const syncedEntry of syncedEntries) {
     totalComponents += syncedEntry.components.length
 
@@ -416,6 +420,7 @@ async function validateJunctionTable(userId: string) {
           projectIds: Array.from(projectIds),
         },
       })
+      junctionFailed = true
       continue
     }
 
@@ -435,6 +440,7 @@ async function validateJunctionTable(userId: string) {
           wrongDates: wrongDates.map(c => c.timesheetEntry.date.toISOString()),
         },
       })
+      junctionFailed = true
       continue
     }
 
@@ -445,9 +451,9 @@ async function validateJunctionTable(userId: string) {
     // Note: We can't validate against RM API hours here, but we can check internal consistency
     if (componentMinutes === 0) {
       log({
-        name: 'Junction Table Duration Sum',
+        name: 'Junction Table Zero Duration',
         status: 'WARN',
-        message: `Synced entry has zero total duration`,
+        message: 'Synced entry has components with zero total duration',
         details: {
           syncedEntryId: syncedEntry.id,
           componentCount: syncedEntry.components.length,
@@ -456,16 +462,18 @@ async function validateJunctionTable(userId: string) {
     }
   }
 
-  log({
-    name: 'Junction Table Integrity',
-    status: 'PASS',
-    message: `All ${syncedEntries.length} synced entries have valid component relationships`,
-    details: {
-      totalSyncedEntries: syncedEntries.length,
-      totalComponents,
-      avgComponentsPerEntry: (totalComponents / syncedEntries.length).toFixed(1),
-    },
-  })
+  if (!junctionFailed) {
+    log({
+      name: 'Junction Table Integrity',
+      status: 'PASS',
+      message: `All ${syncedEntries.length} synced entries have valid component relationships`,
+      details: {
+        totalSyncedEntries: syncedEntries.length,
+        totalComponents,
+        avgComponentsPerEntry: (totalComponents / syncedEntries.length).toFixed(1),
+      },
+    })
+  }
 
   // Show sample junction data
   const sampleEntry = syncedEntries[0]
@@ -541,7 +549,7 @@ async function main() {
 
   console.log('🔍 RM Sync Aggregation Validation')
   console.log(`👤 User ID: ${userId}`)
-  console.log('=' .repeat(60))
+  console.log('='.repeat(60))
   console.log()
 
   try {
@@ -556,9 +564,9 @@ async function main() {
     await validateHashCalculation()
 
     // Summary
-    console.log('=' .repeat(60))
+    console.log('='.repeat(60))
     console.log('📊 VALIDATION SUMMARY')
-    console.log('=' .repeat(60))
+    console.log('='.repeat(60))
     console.log()
 
     const passed = results.filter(r => r.status === 'PASS').length
