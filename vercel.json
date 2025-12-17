@@ -1,9 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "pnpm turbo run build --filter=web",
+  "buildCommand": "pnpm install --frozen-lockfile && pnpm turbo run build --filter=web",
   "outputDirectory": "apps/web/dist",
-  "installCommand": "pnpm install --frozen-lockfile",
+  "installCommand": null,
   "framework": null,
+  "ignoreCommand": "exit 0",
   "rewrites": [
     {
       "source": "/((?!api|_next|static|favicon.ico|.*\\.[^/]+$).*)",
