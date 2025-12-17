@@ -15,7 +15,6 @@ import {
   aggregateEntriesByProjectDay,
   mapBillableToTask,
 } from "./rm-aggregation.js";
-import { timesheetRouter } from "../routers/timesheet.js";
 
 /**
  * Custom error for sync-related issues

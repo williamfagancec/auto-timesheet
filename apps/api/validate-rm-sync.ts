@@ -90,31 +90,18 @@ async function validateUserIsolation(userId: string) {
     })
   }
 
-  // Test 3: Timesheet entries belong to user
-  const entries = await prisma.timesheetEntry.findMany({
+  // Test 3: Verify user has timesheet entries
+  const entryCount = await prisma.timesheetEntry.count({
     where: { userId },
-    take: 10,
   })
-
-  const hasOtherUsersEntries = entries.some(e => e.userId !== userId)
-  if (hasOtherUsersEntries) {
-    log({
-      name: 'Timesheet Entry Ownership',
-      status: 'FAIL',
-      message: 'Found timesheet entries belonging to other users!',
-    })
-    return false
-  }
 
   log({
     name: 'Timesheet Entry Ownership',
-    status: 'PASS',
-    message: `All timesheet entries belong to user ${userId}`,
-    details: { totalEntries: entries.length },
+    status: entryCount > 0 ? 'PASS' : 'WARN',
+    message: entryCount > 0
+    ? `Found ${entryCount} timesheet entries for user ${userId}`
+    : 'No timesheet entries found for user',
   })
-
-  return true
-}
 
 async function validateAggregation(userId: string) {
   console.log('=== AGGREGATION VALIDATION ===\n')
@@ -157,7 +144,7 @@ async function validateAggregation(userId: string) {
       compressionRatio: `${((1 - aggregates.size / entries.length) * 100).toFixed(1)}%`,
     },
   })
-
+  let aggregationRulesFailed = false
   // Validate aggregation rules
   for (const [key, aggregate] of aggregates) {
     const [projectId, dateStr] = key.split('|')
@@ -169,6 +156,7 @@ async function validateAggregation(userId: string) {
         status: 'FAIL',
         message: `Invalid aggregation key: ${key}`,
       })
+      aggregationRulesFailed = true
       continue
     }
 
@@ -181,6 +169,7 @@ async function validateAggregation(userId: string) {
         message: `Aggregate contains entries from different projects`,
         details: { key, wrongProject: wrongProject.map(e => e.projectId) },
       })
+      aggregationRulesFailed = true
       continue
     }
 
@@ -195,6 +184,7 @@ async function validateAggregation(userId: string) {
         message: `Aggregate contains entries from different dates`,
         details: { key, wrongDates: wrongDate.map(e => e.date.toISOString()) },
       })
+      aggregationRulesFailed = true
       continue
     }
 
@@ -212,15 +202,17 @@ async function validateAggregation(userId: string) {
           difference: Math.abs(expectedHours - aggregate.totalHours),
         },
       })
+      aggregationRulesFailed = true
       continue
     }
   }
-
-  log({
-    name: 'Aggregation Rules',
-    status: 'PASS',
-    message: 'All aggregates follow correct grouping rules',
-  })
+  if (!aggregationRulesFailed) {
+    log({
+      name: 'Aggregation Rules',
+      status: 'PASS',
+      message: 'All aggregates follow correct grouping rules'
+    })
+  }
 
   // Show sample aggregates
   const sampleAggregates = Array.from(aggregates.values()).slice(0, 5)

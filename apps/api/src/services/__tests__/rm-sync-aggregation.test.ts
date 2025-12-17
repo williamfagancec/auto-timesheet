@@ -171,7 +171,7 @@ describe('RM Sync Aggregation - User Isolation Tests', () => {
         projectId: 'project-1',
         rmProjectId: 111n,
         rmProjectName: 'RM Project 1',
-        isActive: true,
+        enabled: true,
         createdAt: new Date(),
         updatedAt: new Date(),
       },
