@@ -10,12 +10,39 @@ All endpoints use tRPC for end-to-end type safety and are organized into routers
 
 ## Authentication
 
-All API endpoints require authentication via Lucia Auth session cookies. Unauthenticated requests will receive a `UNAUTHORIZED` error.
+The API supports two authentication methods. All protected endpoints accept either method.
+
+### Session-Based (Frontend)
+
+Used by the web application. Session cookies are automatically managed by the browser.
 
 **Session Cookie:** `auth_session`
 - httpOnly: true
 - sameSite: 'lax'
 - secure: true (production)
+
+### API Key-Based (Scripts & Integrations)
+
+Used for automated access and third-party integrations. See [API_KEY_AUTH.md](./API_KEY_AUTH.md) for detailed documentation.
+
+**Required Headers:**
+- `Authorization: Bearer <TEAM_API_KEY>`
+- `X-User-ID: <USER_ID>`
+
+**Quick Example:**
+```bash
+curl http://localhost:3001/trpc/project.list \
+  -H "Authorization: Bearer your-api-key-here" \
+  -H "X-User-ID: user_123"
+```
+
+**Security:**
+- API keys must be kept secret (never commit to version control)
+- HTTPS required in production
+- Authorization headers are redacted from logs
+- Rate limited to 200 requests/minute per IP
+
+Unauthenticated requests will receive a `UNAUTHORIZED` error.
 
 ---
 

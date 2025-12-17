@@ -9,7 +9,6 @@ import { Login } from './pages/Login'
 import { Signup } from './pages/Signup'
 import { AuthCallback } from './pages/AuthCallback'
 import { Test } from './pages/Test'
-import { Debug } from './pages/Debug'
 import { Events } from './pages/Events'
 import { Timesheet } from './pages/Timesheet'
 
@@ -57,7 +56,6 @@ function App() {
           <Routes>
             {/* Public routes */}
             <Route path="/test" element={<Test />} />
-            <Route path="/debug" element={<Debug />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
