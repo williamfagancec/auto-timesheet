@@ -1,9 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "pnpm build:web",
+  "buildCommand": "pnpm turbo run build --filter=web",
   "outputDirectory": "apps/web/dist",
-  "installCommand": "pnpm install",
-  "framework": "vite",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "framework": null,
   "rewrites": [
     {
       "source": "/((?!api|_next|static|favicon.ico|.*\\.[^/]+$).*)",
