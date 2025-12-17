@@ -1,6 +1,7 @@
 import { router, protectedProcedure } from '../trpc.js'
 import { z } from 'zod'
 import { prisma } from 'database'
+import { prisma } from '@prisma/client'
 import { TRPCError } from '@trpc/server'
 
 const projectNameSchema = z
@@ -28,7 +29,7 @@ export const projectRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
-      const whereClause: any = {
+      const whereClause: Prisma.ProjectWhereInput = {
         userId: ctx.user.id,
       }
 

@@ -232,7 +232,6 @@ model RMSyncedEntryComponent {
   // Contribution metadata (for debugging/auditing)
   durationMinutes   Int      // Duration this entry contributed
   isBillable        Boolean  // Billable status of this component
-  phase             String?  // Phase of this component
   notes             String?  // Notes from this component
 
   createdAt         DateTime @default(now())
@@ -282,7 +281,6 @@ interface AggregatedEntry {
   date: Date
   totalMinutes: number
   isBillable: boolean
-  phase: string | null
   notes: string | null
   contributingEntries: TimesheetEntry[]
 }

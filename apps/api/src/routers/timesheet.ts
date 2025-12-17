@@ -402,13 +402,24 @@ export const timesheetRouter = router({
                 created.push(entry.eventId)
               }
 
-              // Update user defaults for billable
+             let lastBillableValue: boolean | undefined
+
+             for (const entry of input.entries) {
+              // ... existing entry processing ...
+
               if (entry.isBillable !== undefined) {
-                await tx.userProjectDefaults.update({
-                  where: { userId: ctx.user.id },
-                  data: { isBillable: entry.isBillable },
-                })
+                lastBillableValue = entry.isBillable
               }
+              // ... rest of loop ...
+             }
+
+             // Update user defaults once after processing all entries
+             if (lastBillableValue !== undefined) {
+              await tx.userProjectDefaults.update({
+                where: { userId: ctx.user.id },
+                  data: { isBillable: lastBillableValue },
+              })
+             }
 
               // Increment project use count
               await tx.project.update({
