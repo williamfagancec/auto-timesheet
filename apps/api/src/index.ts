@@ -60,6 +60,33 @@ await server.register(rateLimit, {
   },
 })
 
+// Security: Log sanitization - never log Authorization header to prevent API key leakage
+server.addHook('onRequest', async (request, reply) => {
+  const sanitized = { ...request.headers }
+  if (sanitized.authorization) {
+    sanitized.authorization = '[REDACTED]'
+  }
+  request.log.info({
+    method: request.method,
+    url: request.url,
+    headers: sanitized,
+  })
+})
+
+// Security: HTTPS enforcement for API key authentication in production
+server.addHook('onRequest', async (request, reply) => {
+  if (process.env.NODE_ENV === 'production') {
+    const authHeader = request.headers.authorization
+    const isHttps = request.headers['x-forwarded-proto'] === 'https' || request.protocol === 'https'
+
+    if (authHeader && !isHttps) {
+      reply.code(400).send({
+        error: 'API key authentication requires HTTPS',
+      })
+    }
+  }
+})
+
 // Register tRPC
 await server.register(fastifyTRPCPlugin, {
   prefix: '/trpc',

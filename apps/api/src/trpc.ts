@@ -8,11 +8,21 @@ export const publicProcedure = t.procedure
 
 /**
  * Protected procedure - requires authentication
- * Throws UNAUTHORIZED error if user is not logged in
+ * Accepts either session-based auth (cookies) or API key-based auth (headers)
+ * Throws UNAUTHORIZED error if user is not authenticated via either method
  */
 export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
-  if (!ctx.user || !ctx.session) {
+  // Accept either session OR API key auth
+  if (!ctx.user || (!ctx.session && ctx.authMethod !== 'api_key')) {
     throw new TRPCError({ code: 'UNAUTHORIZED' })
+  }
+
+  // Optional: Log API key usage for monitoring
+  if (ctx.authMethod === 'api_key') {
+    console.log('[Auth] API key access:', {
+      userId: ctx.user.id,
+      email: ctx.user.email,
+    })
   }
 
   return next({
