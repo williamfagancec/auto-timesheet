@@ -1,7 +1,7 @@
 import { prisma } from 'database'
-import SuggestionEngine, { PatternExtractor, ConfidenceCalculator } from './suggestion-engine'
-import { extractPatternsFromEvent, calculateRuleConfidence } from './ai-categorization'
-import { RuleCache } from './rule-cache'
+import SuggestionEngine, { PatternExtractor, ConfidenceCalculator } from './suggestion-engine.js'
+import { extractPatternsFromEvent, calculateRuleConfidence } from './ai-categorization.js'
+import { RuleCache } from './rule-cache.js'
 
 export function createDefaultSuggestionEngine() {
   const extractor: PatternExtractor = {

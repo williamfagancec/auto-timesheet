@@ -1,8 +1,8 @@
 import { PrismaClient, CategoryRule, Project } from '@prisma/client'
-import { calculateCombinedConfidence } from './ai-categorization'
-import type { CalendarEventInput } from './ai-categorization'
+import { calculateCombinedConfidence } from './ai-categorization.js'
+import type { CalendarEventInput } from './ai-categorization.js'
 import { AI_CONFIG } from 'config'
-import { RuleCache } from './rule-cache'
+import { RuleCache } from './rule-cache.js'
 
 // Minimal Pattern type used by the extractor
 export interface Pattern {

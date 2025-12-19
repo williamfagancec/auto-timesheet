@@ -10,7 +10,7 @@
 
 import { PrismaClient } from '@prisma/client'
 import { CategoryRuleType } from 'shared'
-import { extractPatternsFromEvent, type CalendarEventInput } from './ai-categorization'
+import { extractPatternsFromEvent, type CalendarEventInput } from './ai-categorization.js'
 
 /**
  * Extracted pattern from event

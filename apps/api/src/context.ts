@@ -1,9 +1,9 @@
 import { CreateFastifyContextOptions } from '@trpc/server/adapters/fastify'
-import { lucia } from './auth/lucia'
+import { lucia } from './auth/lucia.js'
 import type { User, Session } from 'lucia'
-import { getValidAccessToken, isTokenExpired } from './auth/token-refresh'
+import { getValidAccessToken, isTokenExpired } from './auth/token-refresh.js'
 import { prisma } from 'database'
-import { validateApiKey, getUserForApiKey } from './auth/api-key'
+import { validateApiKey, getUserForApiKey } from './auth/api-key.js'
 
 // Track in-flight token refresh operations to prevent concurrent refreshes for the same user
 const tokenRefreshPromises = new Map<string, Promise<void>>()

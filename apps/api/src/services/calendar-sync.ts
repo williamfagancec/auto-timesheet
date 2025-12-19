@@ -1,5 +1,5 @@
 import { prisma } from 'database'
-import createDefaultSuggestionEngine from './suggestion-factory'
+import createDefaultSuggestionEngine from './suggestion-factory.js'
 import { getValidAccessToken } from '../auth/token-refresh.js'
 import { zonedTimeToUtc } from 'date-fns-tz'
 
