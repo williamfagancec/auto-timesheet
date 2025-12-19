@@ -55,7 +55,10 @@
       "Bash(timeout 10 psql:*)",
       "Bash(timeout 3 tail:*)",
       "Bash(ls:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(npx pnpm build:web)",
+      "Bash(npx pnpm install:*)",
+      "Bash(npx pnpm:*)"
     ],
     "deny": [],
     "ask": []
