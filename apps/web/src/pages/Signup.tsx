@@ -21,7 +21,7 @@ export function Signup() {
     onSuccess: () => {
       navigate('/events')
     },
-    onError: (err) => {
+    onError: (err: { message: string }) => {
       setError(err.message)
     },
   })

@@ -176,9 +176,11 @@ export const authRouter = router({
    * Logout - invalidate session
    */
   logout: protectedProcedure.mutation(async ({ ctx }) => {
-    await lucia.invalidateSession(ctx.session.id)
-    const sessionCookie = lucia.createBlankSessionCookie()
-    ctx.res.setCookie(sessionCookie.name, sessionCookie.value, sessionCookie.attributes)
+    if (ctx.session) {
+      await lucia.invalidateSession(ctx.session.id)
+      const sessionCookie = lucia.createBlankSessionCookie()
+      ctx.res.setCookie(sessionCookie.name, sessionCookie.value, sessionCookie.attributes)
+    }
 
     return { success: true }
   }),

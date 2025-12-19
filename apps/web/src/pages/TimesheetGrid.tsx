@@ -5,6 +5,16 @@ import { RMSyncButton } from '../components/RMSyncButton'
 
 type DayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
 
+type ProjectData = {
+  id: string
+  name: string
+  dailyHours: Record<string, number>
+  notes: Record<string, string | undefined>
+  weeklyTotal: number
+  eventHours: Record<string, number>
+  manualHours: Record<string, number>
+}
+
 const DAY_NAMES: { key: DayKey; short: string }[] = [
   { key: 'mon', short: 'Mon' },
   { key: 'tue', short: 'Tue' },
@@ -90,12 +100,12 @@ export function TimesheetGrid() {
 
   // Reset to events mutation
   const resetToEventsMutation = trpc.timesheet.resetToEvents.useMutation({
-    onSuccess: (data) => {
+    onSuccess: (data: { success: boolean; deletedCount: number }) => {
       alert(`Successfully reset! Removed ${data.deletedCount} manual entries.`)
       // Invalidate the grid to refresh data
       utils.timesheet.getWeeklyGrid.invalidate({ weekStartDate: weekStart.toISOString() })
     },
-    onError: (error) => {
+    onError: (error: { message: string }) => {
       alert(`Failed to reset: ${error.message}`)
     },
   })
@@ -260,7 +270,7 @@ export function TimesheetGrid() {
     setActiveCell({ projectId, day })
 
     // Load existing notes and billable from the first entry for this project/day
-    const project = gridData?.projects.find((p: { id: string }) => p.id === projectId)
+    const project = gridData?.projects.find((p: ProjectData) => p.id === projectId)
     const existingNotes = project?.notes[day] || ''
     setNotes(existingNotes)
 
@@ -342,7 +352,7 @@ export function TimesheetGrid() {
   const handleNotesSave = () => {
     if (!activeCell) return
 
-    const project = gridData?.projects.find((p: { id: string }) => p.id === activeCell.projectId)
+    const project = gridData?.projects.find((p: ProjectData) => p.id === activeCell.projectId)
     if (!project) return
 
     const currentHours = project.dailyHours[activeCell.day]
@@ -385,7 +395,7 @@ export function TimesheetGrid() {
   const getAdjustedDailyTotal = (dayKey: DayKey) => {
     if (!gridData) return 0
     let total = 0
-    gridData.projects.forEach((project: { id: string; dailyHours: Record<DayKey, number> }) => {
+    gridData.projects.forEach((project: ProjectData) => {
       const key = `${project.id}-${dayKey}`
       const pendingChange = getPendingChange(key)
       const hasPending = pendingChange !== undefined && pendingChange.parsedHours !== null
@@ -547,7 +557,7 @@ export function TimesheetGrid() {
             </tr>
           </thead>
           <tbody>
-            {gridData.projects.map((project: { id: string; name: string; dailyHours: Record<DayKey, number>; notes: Record<DayKey, string>; eventHours: Record<DayKey, number>; manualHours: Record<DayKey, number> }) => (
+            {gridData.projects.map((project: ProjectData) => (
               <tr key={project.id} className="border-b border-border-light hover:bg-bg-hover transition-colors duration-150">
                 <td className="p-lg border-r border-border-light">
                   <div className="font-medium text-text-primary">{project.name}</div>
@@ -684,7 +694,7 @@ export function TimesheetGrid() {
         <div ref={notesRef} className="mt-lg bg-white rounded-lg border border-border-light shadow-md overflow-hidden">
           <div className="bg-sandy px-lg py-md border-b border-border-light">
             <label className="block text-sm font-medium text-text-primary">
-              Details for {gridData.projects.find((p: { id: string; name: string }) => p.id === activeCell.projectId)?.name} - {DAY_NAMES.find((d) => d.key === activeCell.day)?.short}
+              Details for {gridData.projects.find((p: ProjectData) => p.id === activeCell.projectId)?.name} - {DAY_NAMES.find((d) => d.key === activeCell.day)?.short}
             </label>
           </div>
           <div className="p-lg">

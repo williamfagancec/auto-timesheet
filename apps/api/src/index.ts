@@ -61,7 +61,7 @@ await server.register(rateLimit, {
 })
 
 // Security: Log sanitization - never log Authorization header to prevent API key leakage
-server.addHook('onRequest', async (request, reply) => {
+server.addHook('onRequest', async (request, _reply) => {
   const sanitized = { ...request.headers }
   if (sanitized.authorization) {
     sanitized.authorization = '[REDACTED]'

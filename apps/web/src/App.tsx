@@ -8,7 +8,6 @@ import { httpBatchLink } from '@trpc/client'
 import { Login } from './pages/Login'
 import { Signup } from './pages/Signup'
 import { AuthCallback } from './pages/AuthCallback'
-import { Test } from './pages/Test'
 import { Events } from './pages/Events'
 import { Timesheet } from './pages/Timesheet'
 
@@ -55,7 +54,6 @@ function App() {
         <BrowserRouter>
           <Routes>
             {/* Public routes */}
-            <Route path="/test" element={<Test />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
