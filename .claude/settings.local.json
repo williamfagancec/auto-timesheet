@@ -60,7 +60,8 @@
       "Bash(npx pnpm install:*)",
       "Bash(npx pnpm:*)",
       "Bash(git rev-parse:*)",
-      "Bash(git ls-tree:*)"
+      "Bash(git ls-tree:*)",
+      "Bash(git restore:*)"
     ],
     "deny": [],
     "ask": []
