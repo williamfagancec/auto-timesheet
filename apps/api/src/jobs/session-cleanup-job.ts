@@ -6,12 +6,36 @@ const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
 // Parse Redis URL to get connection config
 function getRedisConfig() {
   const url = new URL(REDIS_URL)
-  return {
+
+  const config: {
+    host: string
+    port: number
+    password?: string
+    username?: string
+    tls?: object
+  } = {
     host: url.hostname,
     port: parseInt(url.port) || 6379,
-    password: url.password || undefined,
-    tls: url.protocol === 'rediss:' ? {} : undefined,
   }
+
+  // Add credentials if present
+  if (url.password) {
+    config.password = url.password
+  }
+  if (url.username && url.username !== 'default') {
+    config.username = url.username
+  }
+
+  // Enable TLS for rediss:// protocol (Upstash requires this)
+  if (url.protocol === 'rediss:') {
+    config.tls = {
+      // Upstash certificates are valid, but we make this configurable
+      // Set REDIS_TLS_REJECT_UNAUTHORIZED=true in env to require cert validation
+      rejectUnauthorized: process.env.REDIS_TLS_REJECT_UNAUTHORIZED === 'true',
+    }
+  }
+
+  return config
 }
 
 const redisConnection = getRedisConfig()
