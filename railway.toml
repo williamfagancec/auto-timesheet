@@ -3,7 +3,7 @@ builder = "NIXPACKS"
 buildCommand = "pnpm install --frozen-lockfile && pnpm --filter database db:generate && turbo run build --filter=api..."
 
 [deploy]
-startCommand = "pnpm --filter database db:deploy && cd apps/api && node dist/index.js"
+startCommand = "cd apps/api && node dist/index.js"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 
