@@ -61,7 +61,18 @@
       "Bash(npx pnpm:*)",
       "Bash(git rev-parse:*)",
       "Bash(git ls-tree:*)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(npx turbo run build:*)",
+      "Bash(openssl rand:*)",
+      "Bash(https://auto-timesheet-production.up.railway.app/trpc/auth.googleOAuth?batch=1)",
+      "Bash(DATABASE_URL=\"postgresql://neondb_owner:npg_1cn0wOavAFGJ@ep-noisy-breeze-a7y57hxv-pooler.ap-southeast-2.aws.neon.tech/neondb?sslmode=require&connection_limit=20&pool_timeout=10\" npx pnpm:*)",
+      "Bash(DATABASE_URL=\"postgresql://neondb_owner:npg_1cn0wOavAFGJ@ep-noisy-breeze-a7y57hxv-pooler.ap-southeast-2.aws.neon.tech/neondb?sslmode=require&connection_limit=20&pool_timeout=10\" npx prisma migrate reset:*)",
+      "Bash(DATABASE_URL=\"postgresql://neondb_owner:npg_1cn0wOavAFGJ@ep-noisy-breeze-a7y57hxv-pooler.ap-southeast-2.aws.neon.tech/neondb?sslmode=require&connection_limit=20&pool_timeout=10\" npx prisma migrate resolve:*)",
+      "Bash(DATABASE_URL=\"postgresql://neondb_owner:npg_1cn0wOavAFGJ@ep-noisy-breeze-a7y57hxv-pooler.ap-southeast-2.aws.neon.tech/neondb?sslmode=require&connection_limit=20&pool_timeout=10\" npx prisma migrate deploy:*)",
+      "Bash(DATABASE_URL=\"postgresql://neondb_owner:npg_1cn0wOavAFGJ@ep-noisy-breeze-a7y57hxv-pooler.ap-southeast-2.aws.neon.tech/neondb?sslmode=require\" psql:*)",
+      "Bash(DATABASE_URL=\"postgresql://neondb_owner:npg_1cn0wOavAFGJ@ep-noisy-breeze-a7y57hxv-pooler.ap-southeast-2.aws.neon.tech/neondb?sslmode=require\" npx prisma db push:*)",
+      "Bash(DATABASE_URL=\"postgresql://neondb_owner:npg_1cn0wOavAFGJ@ep-noisy-breeze-a7y57hxv-pooler.ap-southeast-2.aws.neon.tech/neondb?sslmode=require\" npx prisma migrate resolve:*)",
+      "Bash(DATABASE_URL=\"postgresql://neondb_owner:npg_1cn0wOavAFGJ@ep-noisy-breeze-a7y57hxv-pooler.ap-southeast-2.aws.neon.tech/neondb?sslmode=require\" npx prisma migrate status:*)"
     ],
     "deny": [],
     "ask": []
