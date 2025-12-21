@@ -1,6 +1,6 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "pnpm install --frozen-lockfile && pnpm --filter database db:generate && pnpm --filter api build"
+buildCommand = "pnpm install --frozen-lockfile && pnpm --filter database db:generate && turbo run build --filter=api..."
 
 [deploy]
 startCommand = "cd apps/api && node dist/index.js"
