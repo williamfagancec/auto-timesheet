@@ -128,16 +128,17 @@ server.get('/health', async () => {
     console.error('[Health Check] Database connection failed:', error)
   }
 
-  // Check Redis connectivity (BullMQ)
-  try {
-    const { calendarSyncQueue } = await import('./jobs/calendar-sync-job.js')
-    const isPaused = await calendarSyncQueue.isPaused()
-    checks.redis = isPaused ? 'paused' : 'ok'
-  } catch (error) {
-    checks.redis = 'error'
-    healthy = false
-    console.error('[Health Check] Redis connection failed:', error)
-  }
+  // Check Redis connectivity (BullMQ) - DISABLED to save Redis quota
+  // try {
+  //   const { calendarSyncQueue } = await import('./jobs/calendar-sync-job.js')
+  //   const isPaused = await calendarSyncQueue.isPaused()
+  //   checks.redis = isPaused ? 'paused' : 'ok'
+  // } catch (error) {
+  //   checks.redis = 'error'
+  //   healthy = false
+  //   console.error('[Health Check] Redis connection failed:', error)
+  // }
+  checks.redis = 'disabled'
 
   const status = healthy ? 'ok' : 'degraded'
 
@@ -318,36 +319,41 @@ try {
   }
 
   // Validate Redis connection before starting (in production)
-  if (process.env.NODE_ENV === 'production' || process.env.REDIS_URL) {
-    console.log('[Startup] Validating Redis connection...')
-    try {
-      const { calendarSyncQueue } = await import('./jobs/calendar-sync-job.js')
-      // Try to check queue status - this will fail if Redis is not available
-      await calendarSyncQueue.getJobCounts()
-      console.log('[Startup] Redis connection validated')
-    } catch (redisError) {
-      console.error('[Startup] Redis connection failed:', redisError)
-      console.error('[Startup] BullMQ requires Redis for background jobs. Please check REDIS_URL.')
-      // In production, fail fast if Redis is not available
-      if (process.env.NODE_ENV === 'production') {
-        process.exit(1)
-      } else {
-        console.warn('[Startup] Continuing without Redis (development mode)')
-      }
-    }
-  }
+  // DISABLED: Skipping Redis validation to avoid consuming quota
+  // if (process.env.NODE_ENV === 'production' || process.env.REDIS_URL) {
+  //   console.log('[Startup] Validating Redis connection...')
+  //   try {
+  //     const { calendarSyncQueue } = await import('./jobs/calendar-sync-job.js')
+  //     // Try to check queue status - this will fail if Redis is not available
+  //     await calendarSyncQueue.getJobCounts()
+  //     console.log('[Startup] Redis connection validated')
+  //   } catch (redisError) {
+  //     console.error('[Startup] Redis connection failed:', redisError)
+  //     console.error('[Startup] BullMQ requires Redis for background jobs. Please check REDIS_URL.')
+  //     // In production, fail fast if Redis is not available
+  //     if (process.env.NODE_ENV === 'production') {
+  //       process.exit(1)
+  //     } else {
+  //       console.warn('[Startup] Continuing without Redis (development mode)')
+  //     }
+  //   }
+  // }
+  console.log('[Startup] Skipping Redis validation (background jobs disabled)')
 
   await server.listen({ port: PORT, host: HOST })
   console.log(`Server listening on http://${HOST}:${PORT}`)
 
   // Initialize background jobs
-  if (process.env.NODE_ENV !== 'test') {
-    await Promise.all([
-      initializeCalendarSyncJobs(),
-      initializeSessionCleanupJobs(),
-    ])
-    console.log('Background jobs initialized')
-  }
+  // DISABLED: BullMQ jobs consume too many Redis requests on Upstash free tier
+  // Re-enable when Redis is upgraded or switch to on-demand sync
+  // if (process.env.NODE_ENV !== 'test') {
+  //   await Promise.all([
+  //     initializeCalendarSyncJobs(),
+  //     initializeSessionCleanupJobs(),
+  //   ])
+  //   console.log('Background jobs initialized')
+  // }
+  console.log('Background jobs disabled (Redis quota limit)')
 } catch (err) {
   server.log.error(err)
   process.exit(1)
@@ -360,11 +366,11 @@ signals.forEach((signal) => {
     console.log(`\nReceived ${signal}, shutting down gracefully...`)
 
     try {
-      // Shutdown background jobs
-      await Promise.all([
-        shutdownCalendarSyncJobs(),
-        shutdownSessionCleanupJobs(),
-      ])
+      // Shutdown background jobs (disabled - see startup section)
+      // await Promise.all([
+      //   shutdownCalendarSyncJobs(),
+      //   shutdownSessionCleanupJobs(),
+      // ])
 
       // Close server
       await server.close()
