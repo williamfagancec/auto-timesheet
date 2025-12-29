@@ -40,6 +40,18 @@ model Session {
   @@index([userId])
 }
 
+model OAuthState {
+  id            String   @id @default(cuid())
+  state         String   @unique
+  codeVerifier  String
+  provider      String   @default("google")
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([expiresAt])
+  @@index([state])
+}
+
 model CalendarConnection {
   id                  String    @id @default(cuid())
   userId              String
