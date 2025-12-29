@@ -9,6 +9,7 @@ This document outlines the testing strategy for the Auto Timesheet application, 
 - Focus on critical paths and business logic
 - Prioritize unit tests for AI engine functions
 - Use integration tests for tRPC endpoints
+
 - Minimal E2E tests for smoke testing
 
 ---
