@@ -32,18 +32,24 @@ export async function getValidAccessToken(
   } catch (error) {
     console.error('[Token Refresh] Failed to get access token:', error)
 
-    // Check if user even has an OAuth account
-    const account = await prisma.account.findFirst({
+   // Check if user even has an OAuth account
+   let account
+   try {
+    account = await prisma.account.findFirst({
       where: {
         userId,
-        providerId: provider,
+        providerId: provider, 
       },
-    })
+   })
+    } catch (dbError) {
+      console.error('[Token Refresh] Failed to check account existence:', dbError)
+      throw new Error('TOKEN_REFRESH_FAILED: Failed to verify Google Calendar connection. Please try again.')
+    }
 
     if (!account) {
       throw new Error('CALENDAR_NOT_CONNECTED: No Google Calendar connection found. Please connect your Google Calendar.')
     }
-
+ 
     // If we have an account but getAccessToken failed, it's likely a refresh error
     throw new Error('TOKEN_REFRESH_FAILED: Failed to refresh Google Calendar access. Please reconnect your Google Calendar.')
   }

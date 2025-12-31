@@ -3,6 +3,13 @@ import { prismaAdapter } from "better-auth/adapters/prisma"
 import { prisma } from "database"
 import { hash, verify, type Options } from "@node-rs/argon2"
 
+const requiredEnvVars = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'] as const
+for (const envVar of requiredEnvVars) {
+  if (!process.env[envVar]) {
+    throw new Error(`Missing required environment variable: ${envVar}`)
+  }
+}
+
 // Preserve existing Argon2 configuration from previous implementation
 const argon2Options: Options = {
   memoryCost: 19456,
@@ -37,6 +44,9 @@ export const auth = betterAuth({
         "profile",
         "https://www.googleapis.com/auth/calendar.readonly",
       ],
+      // Required parameters to obtain refresh tokens
+      accessType: "offline",
+      prompt: "select_account consent",
     },
   },
 

@@ -55,8 +55,8 @@ model Account {
   accountId             String // Google user ID
   providerId            String // "google"
   userId                String
-  accessToken           String? // Encrypted by Better-Auth
-  refreshToken          String? // Encrypted by Better-Auth
+  accessToken           String? // Encrypted via Prisma middleware using ENCRYPTION_KEY
+  refreshToken          String? // Encrypted via Prisma middleware using ENCRYPTION_KEY
   idToken               String? // OAuth ID token
   accessTokenExpiresAt  DateTime?
   refreshTokenExpiresAt DateTime?

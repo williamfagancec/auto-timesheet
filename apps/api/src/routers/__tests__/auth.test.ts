@@ -40,11 +40,13 @@ vi.mock('../../auth/password', () => ({
   verifyPassword: vi.fn(),
 }))
 
+const mockGoogleClient = {
+  createAuthorizationURL: vi.fn(),
+  validateAuthorizationCode: vi.fn(),
+}
+
 vi.mock('../../auth/google', () => ({
-  google: {
-    createAuthorizationURL: vi.fn(),
-    validateAuthorizationCode: vi.fn(),
-  },
+  getGoogleClient: vi.fn(() => mockGoogleClient),
   GOOGLE_SCOPES: ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/calendar.readonly'],
 }))
 
@@ -66,7 +68,7 @@ import { prisma as mockPrisma } from 'database'
 import { syncUserEvents } from '../../services/calendar-sync'
 import { lucia } from '../../auth/lucia'
 import { verifyPassword } from '../../auth/password'
-import { google } from '../../auth/google'
+import { getGoogleClient } from '../../auth/google'
 import { encrypt } from '../../auth/encryption'
 import { getUserTimezone } from '../../services/google-calendar'
 
@@ -270,7 +272,7 @@ describe('authRouter', () => {
 
       // Setup mocks
       vi.mocked(mockPrisma.user.findUnique).mockResolvedValue(mockUser as any)
-      vi.mocked(google.validateAuthorizationCode).mockResolvedValue(mockTokens as any)
+      vi.mocked(mockGoogleClient.validateAuthorizationCode).mockResolvedValue(mockTokens as any)
       vi.mocked(getUserTimezone).mockResolvedValue('America/New_York')
       vi.mocked(mockPrisma.calendarConnection.findUnique).mockResolvedValue(null)
       vi.mocked(mockPrisma.calendarConnection.upsert).mockResolvedValue({
@@ -343,7 +345,7 @@ describe('authRouter', () => {
 
       // Setup mocks
       vi.mocked(mockPrisma.user.findUnique).mockResolvedValue(mockUser as any)
-      vi.mocked(google.validateAuthorizationCode).mockResolvedValue(mockTokens as any)
+      vi.mocked(mockGoogleClient.validateAuthorizationCode).mockResolvedValue(mockTokens as any)
       vi.mocked(getUserTimezone).mockResolvedValue('America/New_York')
       vi.mocked(mockPrisma.calendarConnection.findUnique).mockResolvedValue(null)
       vi.mocked(mockPrisma.calendarConnection.upsert).mockResolvedValue({
@@ -390,7 +392,7 @@ describe('authRouter', () => {
       mockUrl.searchParams.set('redirect_uri', 'http://localhost:3001/auth/google/callback')
       mockUrl.searchParams.set('response_type', 'code')
 
-      vi.mocked(google.createAuthorizationURL).mockReturnValue(mockUrl)
+      vi.mocked(mockGoogleClient.createAuthorizationURL).mockReturnValue(mockUrl)
 
       const caller = authRouter.createCaller(ctx as any)
 

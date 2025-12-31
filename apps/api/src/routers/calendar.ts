@@ -95,7 +95,17 @@ export const calendarRouter = router({
       }
     } catch (error) {
       console.error('[Calendar Connect] Failed to connect calendar:', error)
-      throw new TRPCError({
+
+      // Surface specific errors for better UX
+      if (error instanceof Error)
+ {
+  if (error.message.includes('TOKEN_REFRESH_FAILED') || error.message.includes('re-authenticate')) {
+    throw new TRPCError({
+      code: 'UNAUTHORIZED',
+      messsage: 'Google authentication expired. Please sign in with Google again.'
+    })
+  }
+ }     throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
         message: 'Failed to connect Google Calendar. Please try again.',
       })

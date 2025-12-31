@@ -62,11 +62,10 @@ export const authRouter = router({
         }
       } catch (error) {
         if (error instanceof APIError) {
-          // Better-Auth throws APIError for known issues
-          if (error.status === 400 || error.message?.includes('already exists')) {
+          if (error.body?.code?.includes('USER_ALREADY_EXISTS')) {
             throw new TRPCError({
               code: 'CONFLICT',
-              message: 'User with this email already exists',
+              message: 'User with this email already exists'
             })
           }
         }
@@ -100,9 +99,13 @@ export const authRouter = router({
         })
 
         // Set cookies from Better-Auth response
-        const setCookieHeader = authHeaders.get('set-cookie')
-        if (setCookieHeader) {
-          ctx.res.header('set-cookie', setCookieHeader)
+        // Use getSetCookie() to get all Set-Cookie headers as an array
+        const setCookieHeaders = authHeaders.getSetCookie()
+        if (setCookieHeaders && setCookieHeaders.length > 0) {
+          // Set each cookie individually to preserve all cookies (session, CSRF, etc.)
+          for (const cookie of setCookieHeaders) {
+            ctx.res.header('set-cookie', cookie)
+          }
         }
 
         return {
@@ -135,9 +138,13 @@ export const authRouter = router({
       })
 
       // Set cookies from Better-Auth response to clear them
-      const setCookieHeader = authHeaders.get('set-cookie')
-      if (setCookieHeader) {
-        ctx.res.header('set-cookie', setCookieHeader)
+      // Use getSetCookie() to get all Set-Cookie headers as an array
+      const setCookieHeaders = authHeaders.getSetCookie()
+      if (setCookieHeaders && setCookieHeaders.length > 0) {
+        // Set each cookie individually to preserve all cookies (session, CSRF, etc.)
+        for (const cookie of setCookieHeaders) {
+          ctx.res.header('set-cookie', cookie)
+        }
       }
 
       return { success: true }
@@ -196,7 +203,7 @@ export const authRouter = router({
         if (session && session.user) {
           // Create CalendarConnection for calendar-specific metadata
           // OAuth tokens are stored in Account table by Better-Auth
-          const timezone = "UTC" // Default - TODO: fetch from Google Calendar API
+          const timezone = 'UTC' // Default - TODO: fetch from Google Calendar API
 
           await prisma.calendarConnection.upsert({
             where: {
@@ -211,9 +218,11 @@ export const authRouter = router({
               timezone,
             },
             update: {
-              timezone,
+              // Don't overwrite timezone on reconnect - preserve user's setting
+              // Only use timezone on initial connection (handled by create)
             },
           })
+         
 
           return {
             success: true,

@@ -1,6 +1,6 @@
 import { prisma } from 'database'
 import { encrypt, decrypt } from './encryption'
-import { google } from './google'
+import { getGoogleClient } from './google'
 
 /**
  * Check if an access token is expired or will expire soon
@@ -31,7 +31,7 @@ export async function refreshGoogleToken(refreshToken: string): Promise<{
   })
 
   try {
-    const tokens = await google.refreshAccessToken(refreshToken)
+    const tokens = await getGoogleClient().refreshAccessToken(refreshToken)
 
     console.log('[Token Refresh] Success', {
       hasNewRefreshToken: !!tokens.refreshToken(),
