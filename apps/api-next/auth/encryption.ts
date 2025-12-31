@@ -23,7 +23,7 @@ function getEncryptionKey(): Buffer {
 
 /**
  * Encrypt a string (e.g., OAuth token)
- * Returns a base64-encoded string containing: salt + iv + tag + encrypted data
+ * Returns a base64-encoded string containing: iv + tag + encrypted data
  */
 export function encrypt(text: string): string {
   const key = getEncryptionKey();
@@ -44,7 +44,7 @@ export function encrypt(text: string): string {
 
 /**
  * Decrypt an encrypted string
- * Expects base64-encoded string containing: salt + iv + tag + encrypted data
+ * Expects base64-encoded string containing: iv + tag + encrypted data
  */
 export function decrypt(encryptedData: string): string {
   const key = getEncryptionKey();

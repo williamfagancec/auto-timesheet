@@ -72,7 +72,12 @@
       "Bash(DATABASE_URL=\"postgresql://neondb_owner:npg_1cn0wOavAFGJ@ep-noisy-breeze-a7y57hxv-pooler.ap-southeast-2.aws.neon.tech/neondb?sslmode=require\" psql:*)",
       "Bash(DATABASE_URL=\"postgresql://neondb_owner:npg_1cn0wOavAFGJ@ep-noisy-breeze-a7y57hxv-pooler.ap-southeast-2.aws.neon.tech/neondb?sslmode=require\" npx prisma db push:*)",
       "Bash(DATABASE_URL=\"postgresql://neondb_owner:npg_1cn0wOavAFGJ@ep-noisy-breeze-a7y57hxv-pooler.ap-southeast-2.aws.neon.tech/neondb?sslmode=require\" npx prisma migrate resolve:*)",
-      "Bash(DATABASE_URL=\"postgresql://neondb_owner:npg_1cn0wOavAFGJ@ep-noisy-breeze-a7y57hxv-pooler.ap-southeast-2.aws.neon.tech/neondb?sslmode=require\" npx prisma migrate status:*)"
+      "Bash(DATABASE_URL=\"postgresql://neondb_owner:npg_1cn0wOavAFGJ@ep-noisy-breeze-a7y57hxv-pooler.ap-southeast-2.aws.neon.tech/neondb?sslmode=require\" npx prisma migrate status:*)",
+      "Bash(DATABASE_URL=\"postgresql://user:password@localhost:5432/timetracker_test?connection_limit=20&pool_timeout=10\" npx prisma migrate dev:*)",
+      "Bash(export DATABASE_URL=\"postgresql://user:password@localhost:5432/timetracker_test?connection_limit=20&pool_timeout=10\")",
+      "Bash(npx ts-node:*)",
+      "WebFetch(domain:www.better-auth.com)",
+      "Bash(DATABASE_URL=\"postgresql://user:password@localhost:5432/timetracker_test?connection_limit=20&pool_timeout=10\" npx prisma migrate deploy:*)"
     ],
     "deny": [],
     "ask": []

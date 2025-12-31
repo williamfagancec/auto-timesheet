@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto'
 import { TRPCError } from '@trpc/server'
 import { prisma } from 'database'
 
@@ -31,32 +32,16 @@ export function validateApiKey(authHeader: string | undefined): boolean {
   const providedKey = match[1]
 
   // Constant-time comparison to prevent timing attacks
-  return timingSafeEqual(
-    Buffer.from(providedKey),
-    Buffer.from(expectedKey)
-  )
-}
-
-/**
- * Timing-safe string comparison
- * Prevents attackers from using timing differences to guess the API key
- *
- * @param a - First buffer to compare
- * @param b - Second buffer to compare
- * @returns true if buffers are equal, false otherwise
- */
-function timingSafeEqual(a: Buffer, b: Buffer): boolean {
-  // If lengths don't match, still do comparison to maintain constant time
-  if (a.length !== b.length) {
+  try {
+    return timingSafeEqual(
+        Buffer.from(providedKey, 'utf8'),
+        Buffer.from(expectedKey, 'utf8')
+    )
+  } catch {
+    // timingSafeEqual throws if lengths differ
     return false
+    }
   }
-
-  let result = 0
-  for (let i = 0; i < a.length; i++) {
-    result |= a[i] ^ b[i]
-  }
-  return result === 0
-}
 
 /**
  * Fetches user from database and validates existence

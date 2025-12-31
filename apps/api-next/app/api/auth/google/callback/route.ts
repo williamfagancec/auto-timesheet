@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(`${frontendUrl}/login?error=oauth_failed`)
     }
 
-    console.log(`[OAuth Callback] User info retrieved: ${googleUser.email}`)
+    console.log(`[OAuth Callback] User info retrieved: ${googleUser.id}`)
 
     // Find or create user
     let user = await prisma.user.findUnique({

@@ -33,6 +33,76 @@ export const calendarRouter = router({
   }),
 
   /**
+   * Connect Google Calendar
+   * Links the user's Better-Auth Google Account to a CalendarConnection
+   * Requires user to have authenticated via Google OAuth (Better-Auth)
+   */
+  connect: protectedProcedure.mutation(async ({ ctx }) => {
+    // Check if user has a Google Account (via Better-Auth OAuth)
+    const account = await prisma.account.findFirst({
+      where: {
+        userId: ctx.user.id,
+        providerId: 'google',
+      },
+    })
+
+    if (!account) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'Please sign in with Google first to connect your calendar',
+      })
+    }
+
+    // Check if connection already exists
+    const existingConnection = await prisma.calendarConnection.findUnique({
+      where: {
+        userId_provider: {
+          userId: ctx.user.id,
+          provider: 'google',
+        },
+      },
+    })
+
+    if (existingConnection) {
+      return {
+        success: true,
+        message: 'Calendar already connected',
+      }
+    }
+
+    // Get access token to verify connection and detect timezone
+    try {
+      const { getValidAccessToken } = await import('../auth/token-refresh.js')
+      const accessToken = await getValidAccessToken(ctx.user.id, 'google')
+
+      // Detect user's timezone from Google Calendar
+      const { getUserTimezone } = await import('../services/google-calendar.js')
+      const timezone = await getUserTimezone(accessToken)
+
+      // Create CalendarConnection
+      await prisma.calendarConnection.create({
+        data: {
+          userId: ctx.user.id,
+          provider: 'google',
+          timezone,
+        },
+      })
+
+      return {
+        success: true,
+        message: 'Google Calendar connected successfully',
+        timezone,
+      }
+    } catch (error) {
+      console.error('[Calendar Connect] Failed to connect calendar:', error)
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to connect Google Calendar. Please try again.',
+      })
+    }
+  }),
+
+  /**
    * List all available Google calendars
    */
   list: protectedProcedure.query(async ({ ctx }) => {

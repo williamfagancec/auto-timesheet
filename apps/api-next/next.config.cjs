@@ -4,7 +4,7 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ['@prisma/client', '@node-rs/argon2'],
   },
-  // Disable static page generation for API routes
+  // Generate standalone build for serverless deployment
   output: 'standalone',
 }
 
