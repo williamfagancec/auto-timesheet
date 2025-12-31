@@ -9,15 +9,13 @@ const t = initTRPC.context<Context>().create({
 export const router = t.router
 export const publicProcedure = t.procedure
 
+/**
+ * Protected procedure - requires authentication via Better-Auth session
+ * Throws UNAUTHORIZED error if user is not authenticated
+ */
 export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
-  // Allow API key auth OR session auth
-  if (!ctx.user) {
-    throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Authentication required' })
-  }
-
-  // If using session auth, require session
-  if (ctx.authMethod === 'session' && !ctx.session) {
-    throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Valid session required' })
+  if (!ctx.user || !ctx.session) {
+    throw new TRPCError({ code: 'UNAUTHORIZED' })
   }
 
   return next({

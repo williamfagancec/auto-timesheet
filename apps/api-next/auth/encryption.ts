@@ -23,7 +23,7 @@ function getEncryptionKey(): Buffer {
 
 /**
  * Encrypt a string (e.g., OAuth token)
- * Returns a base64-encoded string containing: iv + tag + encrypted data
+ * Returns a base64-encoded string containing: salt + iv + tag + encrypted data
  */
 export function encrypt(text: string): string {
   const key = getEncryptionKey();
@@ -44,31 +44,26 @@ export function encrypt(text: string): string {
 
 /**
  * Decrypt an encrypted string
- * Expects base64-encoded string containing: iv + tag + encrypted data
+ * Expects base64-encoded string containing: salt + iv + tag + encrypted data
  */
 export function decrypt(encryptedData: string): string {
-  try {
-    const key = getEncryptionKey();
-    const buffer = Buffer.from(encryptedData, "base64");
+  const key = getEncryptionKey();
+  const buffer = Buffer.from(encryptedData, "base64");
 
-    // Extract components
-    const iv = buffer.subarray(0, IV_LENGTH);
-    const tag = buffer.subarray(TAG_POSITION, ENCRYPTED_POSITION);
-    const encrypted = buffer.subarray(ENCRYPTED_POSITION);
-    const decipher = createDecipheriv (ALGORITHM, key, iv);
-    decipher.setAuthTag(tag);
+  // Extract components
+  const iv = buffer.subarray(0, IV_LENGTH);
+  const tag = buffer.subarray(TAG_POSITION, ENCRYPTED_POSITION);
+  const encrypted = buffer.subarray(ENCRYPTED_POSITION);
 
-    const decrypted = Buffer.concat([
-      decipher.update(encrypted),
-      decipher.final(),
-    ]);
+  const decipher = createDecipheriv(ALGORITHM, key, iv);
+  decipher.setAuthTag(tag);
 
-    return decrypted.toString("utf8");
-  } catch (error) {
-    throw new Error(
-      `Decryption failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-    );
-  }
+  const decrypted = Buffer.concat([
+    decipher.update(encrypted),
+    decipher.final(),
+  ]);
+
+  return decrypted.toString("utf8");
 }
 
 /**

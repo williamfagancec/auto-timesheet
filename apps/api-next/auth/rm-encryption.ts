@@ -1,15 +1,11 @@
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes,
-  hkdfSync,
-} from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
 
 /**
- * Get master encryption key from environment variable
+ * Get encryption key from environment variable
+ * Uses the same ENCRYPTION_KEY as Google OAuth tokens
  * The key must be 32 bytes (64 hex characters)
  */
 function getEncryptionKey(): Buffer {
@@ -24,17 +20,6 @@ function getEncryptionKey(): Buffer {
 }
 
 /**
- * Get RM-specific encryption key derived from master key
- * Uses HKDF key derivation to create a context-specific key for RM API tokens
- * This ensures RM tokens use a different key than Google OAuth tokens
- */
-function getRMEncryptionKey(): Buffer {
-  const masterKey = getEncryptionKey();
-  // Derive a 32-byte RM-specific key using HKDF with sha256
-  return Buffer.from(hkdfSync("sha256", masterKey, "", "rm-api-tokens", 32));
-}
-
-/**
  * Encrypt RM API token
  * Returns separate components for database storage
  */
@@ -43,7 +28,7 @@ export function encryptRMToken(token: string): {
   iv: string;
   authTag: string;
 } {
-  const key = getRMEncryptionKey();
+  const key = getEncryptionKey();
   const iv = randomBytes(IV_LENGTH);
 
   const cipher = createCipheriv(ALGORITHM, key, iv);
@@ -69,7 +54,7 @@ export function decryptRMToken(
   iv: string,
   authTag: string
 ): string {
-  const key = getRMEncryptionKey();
+  const key = getEncryptionKey();
 
   const decipher = createDecipheriv(
     ALGORITHM,
