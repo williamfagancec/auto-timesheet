@@ -1,7 +1,7 @@
 import { router } from '../lib/trpc'
 
 // Routers will be imported and added here as we migrate them
-// import { authRouter } from './auth'
+import { authRouter } from './auth'
 // import { projectRouter } from './project'
 // import { calendarRouter } from './calendar'
 // import { timesheetRouter } from './timesheet'
@@ -11,7 +11,7 @@ import { router } from '../lib/trpc'
 
 export const appRouter = router({
   // Routers will be added incrementally during migration
-  // auth: authRouter,
+  auth: authRouter,
   // project: projectRouter,
   // calendar: calendarRouter,
   // timesheet: timesheetRouter,
