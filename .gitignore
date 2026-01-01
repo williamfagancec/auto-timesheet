@@ -43,3 +43,6 @@ yarn-error.log*
 # prisma
 prisma/migrations
 apps/web/.env.development
+
+# claude local settings (may contain sensitive credentials)
+.claude/settings.local.json

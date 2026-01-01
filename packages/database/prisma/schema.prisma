@@ -13,12 +13,16 @@ datasource db {
 model User {
   id             String   @id @default(cuid())
   email          String   @unique
+  emailVerified  Boolean  @default(false) // NEW: Better-Auth email verification
   name           String?
-  hashedPassword String?  // Optional: null for OAuth-only users
-  rmUserId       Int?     // RM user ID for this user (used when creating time entries)
+  image          String? // NEW: Better-Auth profile image (OAuth)
+  hashedPassword String? // Optional: null for OAuth-only users
+  rmUserId       Int? // RM user ID for this user (used when creating time entries)
   createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt // NEW: Better-Auth requires this
 
   sessions        Session[]
+  accounts        Account[] // NEW: Better-Auth OAuth accounts
   projects        Project[]
   entries         TimesheetEntry[]
   rules           CategoryRule[]
@@ -33,49 +37,73 @@ model Session {
   id        String   @id @default(cuid())
   userId    String
   expiresAt DateTime
+  token     String   @unique // NEW: Better-Auth requires unique session token
+  ipAddress String? // NEW: Better-Auth session tracking
+  userAgent String? // NEW: Better-Auth session tracking
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt // NEW: Better-Auth requires this
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }
 
-model OAuthState {
-  id            String   @id @default(cuid())
-  state         String   @unique
-  codeVerifier  String
-  provider      String   @default("google")
-  expiresAt     DateTime
-  createdAt     DateTime @default(now())
+// NOTE: OAuthState removed - Better-Auth handles OAuth state internally
 
-  @@index([expiresAt])
-  @@index([state])
+model Account {
+  id                    String    @id @default(cuid())
+  accountId             String // Google user ID
+  providerId            String // "google"
+  userId                String
+  accessToken           String? // Encrypted via Prisma middleware using ENCRYPTION_KEY
+  refreshToken          String? // Encrypted via Prisma middleware using ENCRYPTION_KEY
+  idToken               String? // OAuth ID token
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String? // For password provider (unused for OAuth)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String // Email address
+  value      String // Verification token
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([identifier, value])
 }
 
 model CalendarConnection {
-  id                  String    @id @default(cuid())
+  id                  String @id @default(cuid())
   userId              String
-  provider            String    @default("google")
-  accessToken         String
-  refreshToken        String?
-  expiresAt           DateTime?
-  selectedCalendarIds Json?     // Array of calendar IDs to sync
-  timezone            String    @default("UTC") // User's timezone (e.g., "Australia/Sydney")
+  provider            String @default("google")
+  selectedCalendarIds Json? // Array of calendar IDs to sync
+  timezone            String @default("UTC") // User's timezone (e.g., "Australia/Sydney")
 
-  // Diagnostic fields for token refresh monitoring
-  refreshTokenUpdatedAt DateTime? // When refresh token was last updated
-  lastRefreshAttempt    DateTime? // When we last attempted to refresh the access token
-  refreshFailureCount   Int       @default(0) // Count of consecutive refresh failures
-  lastRefreshError      String?   // Last error message from refresh attempt (for debugging)
+  // Calendar sync metadata
+  lastSyncAt    DateTime?
+  lastSyncError String?
 
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, provider])
   @@index([userId])
 }
+
+// NOTE: OAuth tokens (accessToken, refreshToken, expiresAt) moved to Account table
+// NOTE: Diagnostic fields removed - Better-Auth handles token refresh monitoring
 
 model Project {
   id         String   @id @default(cuid())
@@ -86,11 +114,11 @@ model Project {
   useCount   Int      @default(0)
   createdAt  DateTime @default(now())
 
-  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  entries         TimesheetEntry[]
-  rules           CategoryRule[]
-  suggestionLogs  SuggestionLog[]
-  rmMappings      RMProjectMapping[]
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entries        TimesheetEntry[]
+  rules          CategoryRule[]
+  suggestionLogs SuggestionLog[]
+  rmMappings     RMProjectMapping[]
 
   @@index([userId, lastUsedAt])
 }
@@ -99,7 +127,7 @@ model CalendarEvent {
   id            String   @id @default(cuid())
   googleEventId String
   userId        String
-  calendarId    String   // Google Calendar ID this event belongs to
+  calendarId    String // Google Calendar ID this event belongs to
   title         String
   startTime     DateTime
   endTime       DateTime
@@ -112,9 +140,9 @@ model CalendarEvent {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  entry           TimesheetEntry?
-  suggestionLogs  SuggestionLog[]
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entry          TimesheetEntry?
+  suggestionLogs SuggestionLog[]
 
   @@unique([userId, googleEventId, splitIndex])
   @@index([userId, startTime])
@@ -123,18 +151,18 @@ model CalendarEvent {
 }
 
 model TimesheetEntry {
-  id        String   @id @default(cuid())
-  userId    String
-  eventId   String?  @unique
-  projectId String?
-  date      DateTime
-  duration  Int // in minutes
-  isManual  Boolean  @default(false)
-  isSkipped Boolean  @default(false)
-  notes     String?
-  isBillable Boolean @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(cuid())
+  userId     String
+  eventId    String?  @unique
+  projectId  String?
+  date       DateTime
+  duration   Int // in minutes
+  isManual   Boolean  @default(false)
+  isSkipped  Boolean  @default(false)
+  notes      String?
+  isBillable Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   user               User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
   event              CalendarEvent?           @relation(fields: [eventId], references: [id])
@@ -147,13 +175,13 @@ model TimesheetEntry {
 model CategoryRule {
   id               String    @id @default(cuid())
   userId           String
-  ruleType         String    // TITLE_KEYWORD, ATTENDEE_EMAIL, ATTENDEE_DOMAIN, CALENDAR_NAME, RECURRING_EVENT_ID
-  condition        String    // The pattern to match (e.g., keyword, email, domain, calendar ID, or event ID)
+  ruleType         String // TITLE_KEYWORD, ATTENDEE_EMAIL, ATTENDEE_DOMAIN, CALENDAR_NAME, RECURRING_EVENT_ID
+  condition        String // The pattern to match (e.g., keyword, email, domain, calendar ID, or event ID)
   projectId        String
   confidenceScore  Float     @default(0.5) // Base confidence score (0.0-1.0)
-  matchCount       Int       @default(0)   // Number of times this rule has been matched
-  totalSuggestions Int       @default(0)   // Total times this rule was suggested (accepted or rejected)
-  accuracy         Float     @default(0)   // Success rate: acceptedCount / totalSuggestions
+  matchCount       Int       @default(0) // Number of times this rule has been matched
+  totalSuggestions Int       @default(0) // Total times this rule was suggested (accepted or rejected)
+  accuracy         Float     @default(0) // Success rate: acceptedCount / totalSuggestions
   lastMatchedAt    DateTime? // Last time this rule was matched/suggested
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
@@ -169,13 +197,13 @@ model CategoryRule {
 }
 
 model SuggestionLog {
-  id                  String   @id @default(cuid())
-  userId              String
-  eventId             String
-  suggestedProjectId  String
-  confidence          Float    // Confidence score of the suggestion (0.0-1.0)
-  outcome             String   // ACCEPTED, REJECTED, IGNORED
-  createdAt           DateTime @default(now())
+  id                 String   @id @default(cuid())
+  userId             String
+  eventId            String
+  suggestedProjectId String
+  confidence         Float // Confidence score of the suggestion (0.0-1.0)
+  outcome            String // ACCEPTED, REJECTED, IGNORED
+  createdAt          DateTime @default(now())
 
   user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   event   CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
@@ -191,55 +219,55 @@ model SuggestionLog {
 // RM (Resource Management by Smartsheet) Integration Models
 
 model RMConnection {
-  id               String   @id @default(cuid())
-  userId           String   @unique
+  id     String @id @default(cuid())
+  userId String @unique
 
   // Encrypted API token (AES-256-GCM)
-  encryptedToken   String
-  tokenIv          String
-  tokenAuthTag     String
+  encryptedToken String
+  tokenIv        String
+  tokenAuthTag   String
 
   // RM user info
-  rmUserId         Int      // User ID in RM system
-  rmUserEmail      String
-  rmUserName       String?
+  rmUserId    Int // User ID in RM system
+  rmUserEmail String
+  rmUserName  String?
 
   // Sync configuration
-  autoSyncEnabled  Boolean  @default(false)  // Future: auto-sync on entry save
-  lastSyncAt       DateTime?
+  autoSyncEnabled Boolean   @default(false) // Future: auto-sync on entry save
+  lastSyncAt      DateTime?
 
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  projectMappings  RMProjectMapping[]
-  syncLogs         RMSyncLog[]
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectMappings RMProjectMapping[]
+  syncLogs        RMSyncLog[]
 
   @@index([userId])
 }
 
 model RMProjectMapping {
-  id                String   @id @default(cuid())
-  connectionId      String
+  id           String @id @default(cuid())
+  connectionId String
 
   // time-tracker project
-  projectId         String
+  projectId String
 
   // RM project details
-  rmProjectId       Int
-  rmProjectName     String
-  rmProjectCode     String?
+  rmProjectId   Int
+  rmProjectName String
+  rmProjectCode String?
 
   // Sync state
-  enabled           Boolean  @default(true)  // Allow users to temporarily disable
-  lastSyncedAt      DateTime?
+  enabled      Boolean   @default(true) // Allow users to temporarily disable
+  lastSyncedAt DateTime?
 
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  connection        RMConnection      @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  project           Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  syncedEntries     RMSyncedEntry[]
+  connection    RMConnection    @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  project       Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  syncedEntries RMSyncedEntry[]
 
   @@unique([connectionId, projectId])
   @@unique([connectionId, rmProjectId])
@@ -248,24 +276,24 @@ model RMProjectMapping {
 }
 
 model RMSyncedEntry {
-  id                String   @id @default(cuid())
-  mappingId         String
+  id        String @id @default(cuid())
+  mappingId String
 
   // RM entry details (one RM entry per project-day aggregate)
-  rmEntryId         BigInt   // ID returned by RM API (uses BigInt for large IDs)
-  rmEntryUrl        String?  // Optional: deep link to RM entry
+  rmEntryId  BigInt // ID returned by RM API (uses BigInt for large IDs)
+  rmEntryUrl String? // Optional: deep link to RM entry
 
   // Aggregation metadata
-  aggregationDate   DateTime // Date for this aggregate (project-day combination)
-  lastSyncedAt      DateTime
-  lastSyncedHash    String   // Hash of aggregated data (date + totalHours + isBillable + notes)
-  syncVersion       Int      @default(1)  // Increment on each update
+  aggregationDate DateTime // Date for this aggregate (project-day combination)
+  lastSyncedAt    DateTime
+  lastSyncedHash  String // Hash of aggregated data (date + totalHours + isBillable + notes)
+  syncVersion     Int      @default(1) // Increment on each update
 
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  mapping           RMProjectMapping         @relation(fields: [mappingId], references: [id], onDelete: Cascade)
-  components        RMSyncedEntryComponent[] // Multiple timesheet entries contributing to this RM entry
+  mapping    RMProjectMapping         @relation(fields: [mappingId], references: [id], onDelete: Cascade)
+  components RMSyncedEntryComponent[] // Multiple timesheet entries contributing to this RM entry
 
   @@unique([mappingId, aggregationDate]) // One RM entry per project-day
   @@index([mappingId])
@@ -274,19 +302,19 @@ model RMSyncedEntry {
 
 // Junction table tracking which timesheet entries contribute to aggregated RM entry
 model RMSyncedEntryComponent {
-  id                String   @id @default(cuid())
-  rmSyncedEntryId   String   // The aggregated RM entry
-  timesheetEntryId  String   // One of the contributing timesheet entries
+  id               String @id @default(cuid())
+  rmSyncedEntryId  String // The aggregated RM entry
+  timesheetEntryId String // One of the contributing timesheet entries
 
   // Contribution metadata (for debugging/auditing)
-  durationMinutes   Int      // Duration this entry contributed
-  isBillable        Boolean  // Billable status of this component
-  notes             String?  // Notes from this component
+  durationMinutes Int // Duration this entry contributed
+  isBillable      Boolean // Billable status of this component
+  notes           String? // Notes from this component
 
-  createdAt         DateTime @default(now())
+  createdAt DateTime @default(now())
 
-  rmSyncedEntry     RMSyncedEntry  @relation(fields: [rmSyncedEntryId], references: [id], onDelete: Cascade)
-  timesheetEntry    TimesheetEntry @relation(fields: [timesheetEntryId], references: [id], onDelete: Cascade)
+  rmSyncedEntry  RMSyncedEntry  @relation(fields: [rmSyncedEntryId], references: [id], onDelete: Cascade)
+  timesheetEntry TimesheetEntry @relation(fields: [timesheetEntryId], references: [id], onDelete: Cascade)
 
   @@unique([rmSyncedEntryId, timesheetEntryId]) // Each timesheet entry appears once per aggregate
   @@index([rmSyncedEntryId])
@@ -294,33 +322,33 @@ model RMSyncedEntryComponent {
 }
 
 model RMSyncLog {
-  id               String         @id @default(cuid())
-  connectionId     String
+  id           String @id @default(cuid())
+  connectionId String
 
   // Sync job details
-  jobId            String?        // BullMQ job ID (future)
-  status           RMSyncStatus
-  direction        RMSyncDirection  // PUSH (time-tracker → RM)
+  jobId     String? // BullMQ job ID (future)
+  status    RMSyncStatus
+  direction RMSyncDirection // PUSH (time-tracker → RM)
 
   // Stats
-  entriesAttempted Int            @default(0)
-  entriesSuccess   Int            @default(0)
-  entriesFailed    Int            @default(0)
-  entriesSkipped   Int            @default(0)
+  entriesAttempted Int @default(0)
+  entriesSuccess   Int @default(0)
+  entriesFailed    Int @default(0)
+  entriesSkipped   Int @default(0)
 
   // Error tracking
-  errorMessage     String?        @db.Text
-  errorDetails     Json?          // Detailed error info for debugging
+  errorMessage String? @db.Text
+  errorDetails Json? // Detailed error info for debugging
 
-  startedAt        DateTime       @default(now())
-  completedAt      DateTime?
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
 
-  connection       RMConnection   @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  connection RMConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  // NOTE: Partial unique index on (connectionId) WHERE status='RUNNING' is enforced
+  // via raw SQL migration to prevent race conditions. Only one RUNNING sync per connection allowed.
 
   @@index([connectionId])
   @@index([status])
-  // NOTE: Partial unique index on (connectionId) WHERE status='RUNNING' is enforced
-  // via raw SQL migration to prevent race conditions. Only one RUNNING sync per connection allowed.
 }
 
 enum RMSyncStatus {
@@ -328,13 +356,13 @@ enum RMSyncStatus {
   RUNNING
   COMPLETED
   FAILED
-  PARTIAL  // Some entries succeeded, some failed
+  PARTIAL // Some entries succeeded, some failed
 }
 
 enum RMSyncDirection {
-  PUSH           // time-tracker → RM (MVP)
-  PULL           // RM → time-tracker (future)
-  BIDIRECTIONAL  // future
+  PUSH // time-tracker → RM (MVP)
+  PULL // RM → time-tracker (future)
+  BIDIRECTIONAL // future
 }
 
 model UserProjectDefaults {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getOAuthState } from '../../../../../auth/oauth-state-store'
-import { google, validateGoogleConfig } from '../../../../../auth/google'
+import { getGoogleClient } from '../../../../../auth/google'
 import { encrypt } from '../../../../../auth/encryption'
 import { lucia } from '../../../../../auth/lucia'
 import { prisma } from 'database'
@@ -12,8 +12,6 @@ import { prisma } from 'database'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  // Validate config at runtime
-  validateGoogleConfig()
   const searchParams = req.nextUrl.searchParams
   const code = searchParams.get('code')
   const state = searchParams.get('state')
@@ -41,7 +39,7 @@ export async function GET(req: NextRequest) {
     console.log('[OAuth Callback] OAuth state validated successfully')
 
     // Exchange authorization code for tokens
-    const tokens = await google.validateAuthorizationCode(code, storedOAuth.codeVerifier)
+    const tokens = await getGoogleClient().validateAuthorizationCode(code, storedOAuth.codeVerifier)
 
     // Fetch user info from Google
     const googleUserResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
@@ -68,7 +66,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(`${frontendUrl}/login?error=oauth_failed`)
     }
 
-    console.log(`[OAuth Callback] User info retrieved: ${googleUser.email}`)
+    console.log(`[OAuth Callback] User info retrieved: ${googleUser.id}`)
 
     // Find or create user
     let user = await prisma.user.findUnique({

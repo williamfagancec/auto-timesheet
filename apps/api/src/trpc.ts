@@ -7,22 +7,12 @@ export const router = t.router
 export const publicProcedure = t.procedure
 
 /**
- * Protected procedure - requires authentication
- * Accepts either session-based auth (cookies) or API key-based auth (headers)
- * Throws UNAUTHORIZED error if user is not authenticated via either method
+ * Protected procedure - requires authentication via Better-Auth session
+ * Throws UNAUTHORIZED error if user is not authenticated
  */
 export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
-  // Accept either session OR API key auth
-  if (!ctx.user || (!ctx.session && ctx.authMethod !== 'api_key')) {
+  if (!ctx.user || !ctx.session) {
     throw new TRPCError({ code: 'UNAUTHORIZED' })
-  }
-
-  // Optional: Log API key usage for monitoring
-  if (ctx.authMethod === 'api_key') {
-    console.log('[Auth] API key access:', {
-      userId: ctx.user.id,
-      email: ctx.user.email,
-    })
   }
 
   return next({

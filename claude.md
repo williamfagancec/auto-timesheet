@@ -7,7 +7,7 @@ A personal time tracking tool that automatically syncs with Google Calendar and 
 
 **Frontend:** React 18 + TypeScript + Vite, Tailwind CSS, Zustand + TanStack Query, React Hook Form + Zod, Radix UI, React Router v6, tRPC client
 
-**Backend:** Node.js 20.x + Fastify, tRPC, PostgreSQL + Prisma ORM, Redis (Upstash), BullMQ, Lucia Auth + Google OAuth 2.0, Zod validation
+**Backend:** Node.js 20.x + Fastify, tRPC, PostgreSQL + Prisma ORM, Redis (Upstash), BullMQ, Better-Auth + Google OAuth 2.0, Zod validation
 
 **Infrastructure:** Turborepo monorepo, Neon PostgreSQL, Upstash Redis, Vercel (frontend), Railway/Fly.io (backend planned)
 
@@ -27,14 +27,14 @@ auto-timesheet/
 
 ## Core Features (MVP Scope)
 
-1. **User Authentication** - Email/password (Argon2) + Google OAuth with encrypted token storage (AES-256-GCM), automatic token refresh, Lucia Auth sessions
+1. **User Authentication** - Email/password (Argon2) + Google OAuth with encrypted token storage (AES-256-GCM), automatic token refresh, Better-Auth sessions with email verification
 2. **Calendar Integration** - List/select Google calendars, fetch events via API, store with metadata, timezone detection
 3. **Time Tracking** - Automatic timesheet entries from calendar events, manual entry creation, project categorization, weekly grid view
 4. **AI Categorization** - Rule-based learning from user patterns (title keywords, attendee emails, calendar source, recurring events), 60%+ accuracy target
 
 ## Database Schema
 
-See `packages/database/prisma/schema.prisma`. Key models: User, Session, CalendarConnection, CalendarEvent, Project, TimesheetEntry, CategoryRule (AI learning), SuggestionLog (analytics).
+See `packages/database/prisma/schema.prisma`. Key models: User, Session, Account (OAuth providers), Verification (email verification), CalendarConnection, CalendarEvent, Project, TimesheetEntry, CategoryRule (AI learning), SuggestionLog (analytics).
 
 ## Security
 
@@ -56,7 +56,7 @@ pnpm dev:api          # Backend only (port 3001)
 ```
 
 ### Environment Variables
-See `.env`: DATABASE_URL (Neon), REDIS_URL (Upstash), SESSION_SECRET, ENCRYPTION_KEY, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI
+See `.env`: DATABASE_URL (Neon), REDIS_URL (Upstash), BETTER_AUTH_SECRET (or SESSION_SECRET), ENCRYPTION_KEY, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, API_URL (for OAuth redirects)
 
 ### Database Commands
 ```bash
@@ -78,7 +78,7 @@ pnpm db:seed          # Seed AI test data
 - **tRPC**: End-to-end type safety, no API docs needed
 - **Zustand**: Less boilerplate than Context API
 - **BullMQ**: Redis-based reliability for calendar sync
-- **Lucia Auth**: Modern, type-safe session management
+- **Better-Auth**: Modern, type-safe auth with OAuth 2.0 and email verification
 - **Argon2**: OWASP recommended over bcrypt
 - **AES-256-GCM**: Authenticated encryption prevents tampering
 
@@ -125,10 +125,11 @@ pnpm db:seed          # Seed AI test data
 
 **Infrastructure & Core Backend**
 - Turborepo monorepo with pnpm workspaces
-- Neon PostgreSQL deployed with all 8 models (User, Session, CalendarConnection, CalendarEvent, Project, TimesheetEntry, CategoryRule, SuggestionLog)
-- Email/password auth (Argon2) + Google OAuth with PKCE flow (Arctic)
-- Lucia Auth session management with httpOnly/sameSite cookies
-- Token encryption (AES-256-GCM) and auto-refresh
+- Neon PostgreSQL deployed with Better-Auth tables (User, Session, Account, Verification) + app models (CalendarConnection, CalendarEvent, Project, TimesheetEntry, CategoryRule, SuggestionLog)
+- Email/password auth (Argon2) with email verification + Google OAuth 2.0
+- Better-Auth session management (30-day expiration, automatic refresh after 1 day)
+- httpOnly/sameSite cookies for CSRF protection
+- OAuth token encryption (AES-256-GCM) and auto-refresh
 - Rate limiting (100 req/min global)
 - Background calendar sync jobs with BullMQ
 
@@ -409,47 +410,63 @@ pnpm db:seed          # Seed AI test data
 - `apps/api/src/routers/__tests__/timesheet-reset.test.ts` - Test suite (NEW)
 - `docs/API.md` - API documentation updated
 
-### 🔐 Session Management & Token Refresh - Complete (2025-11-22)
+### 🔐 Better-Auth Migration - Complete (2025-12-29)
 
-**Status:** Fully implemented with session timeout, proactive token refresh, and automated cleanup.
+**Status:** Fully migrated from Lucia Auth to Better-Auth with enhanced OAuth and email verification.
 
-**Session Timeout:**
-- Configured 30-day session expiration in Lucia Auth (`apps/api/src/auth/lucia.ts:12`)
-- Sessions automatically expire after 30 days of inactivity
-- Lucia extends sessions in the second half of their lifetime (15 days)
-- Users will be logged out when session expires, forcing token refresh on next login
+**Breaking Changes (Deployment):**
+- All users must re-login after deployment
+- Users must reconnect Google Calendar (OAuth tokens stored in new Account table)
+- Email verification now required for new signups
 
-**Proactive Token Refresh:**
-- Added token refresh on every authenticated request (`apps/api/src/context.ts:43-60`)
-- When user accesses app with valid session, Google OAuth tokens are automatically refreshed if expired
-- Runs in background - doesn't block requests if refresh fails
-- Ensures calendar events always sync with fresh tokens
-- Silently handles users without calendar connections (no error spam)
+**Session Management:**
+- Configured 30-day session expiration via Better-Auth (`apps/api/src/auth/better-auth.ts:54`)
+- Sessions automatically refresh after 1 day of activity (`updateAge: 60 * 60 * 24`)
+- Better-Auth handles session validation and cookie management automatically
+- Sessions stored with metadata: IP address, user agent, session token
 
-**Automatic Cleanup:**
-- Created session cleanup background job (`apps/api/src/jobs/session-cleanup-job.ts`)
-- Runs every 6 hours via BullMQ to delete expired sessions from database
-- Prevents database bloat from abandoned sessions
-- Integrated with server startup and graceful shutdown
+**Authentication Features:**
+- Email/password authentication with Argon2 hashing (preserves existing security config)
+- Google OAuth 2.0 with offline access (refresh tokens)
+- Email verification required for new signups
+- OAuth tokens stored encrypted in Account table via Better-Auth
+- Calendar connection links Account → CalendarConnection for token access
 
-**User Experience:**
-- Users no longer remain logged in indefinitely
-- Sessions timeout after 30 days, requiring re-authentication
-- Token refresh happens automatically when user opens app
-- Calendar sync triggered immediately after login (already existed)
-- No manual token refresh needed - completely transparent to user
+**OAuth Token Management:**
+- Better-Auth automatically handles token refresh via its built-in refresh mechanism
+- OAuth credentials stored in Account table with proper encryption
+- Token refresh integrated into calendar sync operations
+- Graceful error handling for expired or revoked tokens
+
+**Database Schema Updates:**
+- Added User fields: `emailVerified`, `image`, `updatedAt`
+- Added Session fields: `token` (unique), `ipAddress`, `userAgent`, `updatedAt`
+- Added Account table for OAuth providers (stores tokens, refresh tokens, scopes)
+- Added Verification table for email verification codes
+- Removed OAuthState table (Better-Auth handles state internally)
+- CalendarConnection now stores only metadata (timezone, selected calendars)
+
+**Code Improvements:**
+- Simplified context.ts - uses `auth.api.getSession()` for validation
+- Type-safe auth router using Better-Auth API methods
+- Enhanced error handling with Better-Auth error codes (USER_ALREADY_EXISTS, etc.)
+- Removed custom OAuth callback handler (Better-Auth provides this)
+- Added `calendar.connect` endpoint to link Better-Auth Account to CalendarConnection
 
 **Technical Implementation:**
-- Uses Lucia v3 `TimeSpan` API for session expiration
-- Token refresh uses existing `getValidAccessToken()` function
-- Session cleanup uses BullMQ repeatable jobs (cron pattern: `0 */6 * * *`)
-- Graceful error handling - token refresh failures don't break user flow
+- Better-Auth configuration: `apps/api/src/auth/better-auth.ts`
+- Prisma adapter for PostgreSQL integration
+- Session cookies: httpOnly, sameSite (lax), secure in production
+- OAuth scopes include Google Calendar readonly access
+- Migration: `packages/database/prisma/migrations/20251229_migrate_to_better_auth/`
 
 **Files Modified:**
-- `apps/api/src/auth/lucia.ts` - Added 30-day session timeout
-- `apps/api/src/context.ts` - Added proactive token refresh on session validation
-- `apps/api/src/jobs/session-cleanup-job.ts` - Session cleanup background job (NEW)
-- `apps/api/src/index.ts` - Integrated session cleanup job into server lifecycle
+- `apps/api/src/auth/better-auth.ts` - Better-Auth configuration (NEW)
+- `apps/api/src/context.ts` - Simplified session validation with Better-Auth
+- `apps/api/src/routers/auth.ts` - Migrated all endpoints to Better-Auth API
+- `apps/api/src/routers/calendar.ts` - Added connect endpoint for OAuth linking
+- `apps/api/src/auth/token-refresh.ts` - Updated to use Better-Auth Account table
+- `packages/database/prisma/schema.prisma` - Better-Auth schema integration
 
 ### 📤 RM Integration Phase 3: Manual Sync - Complete (2025-12-10)
 
@@ -763,8 +780,11 @@ apps/web/src/pages/TimesheetGrid.tsx     [MODIFIED] Added RMSyncButton integrati
 ### Implementation Details
 
 **Authentication:**
-- Email normalization (lowercase), session cookies (sameSite: lax via Vite proxy)
-- OAuth state: in-memory Map with 10-min expiry
+- Better-Auth handles session validation, cookie management, and OAuth flows
+- Email/password with Argon2 hashing + email verification
+- Google OAuth 2.0 with offline access for refresh tokens
+- OAuth tokens stored encrypted in Account table (via Better-Auth)
+- Session cookies: httpOnly, sameSite (lax), 30-day expiration
 - Generic error messages prevent info disclosure
 - Vite proxy enables same-origin cookies during development
 
@@ -790,7 +810,7 @@ apps/web/src/pages/TimesheetGrid.tsx     [MODIFIED] Added RMSyncButton integrati
 
 ### Key Files Reference
 
-**Backend:** `apps/api/src/routers/` (auth, calendar, project, timesheet, suggestions, analytics), `apps/api/src/services/` (google-calendar, calendar-sync, ai-categorization, learning, analytics), `apps/api/src/auth/` (lucia, google, encryption, password, token-refresh), `packages/database/prisma/schema.prisma`
+**Backend:** `apps/api/src/routers/` (auth, calendar, project, timesheet, suggestions, analytics, rm), `apps/api/src/services/` (google-calendar, calendar-sync, ai-categorization, learning, analytics, rm-api, rm-sync, rm-connection), `apps/api/src/auth/` (better-auth, encryption, rm-encryption, token-refresh), `packages/database/prisma/schema.prisma`
 
 **Frontend:** `apps/web/src/pages/` (Login, Signup, Events, TimesheetGrid, Projects), `apps/web/src/components/` (ProtectedRoute, ProjectPicker, EventList), `apps/web/vite.config.ts` (proxy config)
 
