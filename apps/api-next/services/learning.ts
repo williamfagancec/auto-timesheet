@@ -86,7 +86,7 @@ export async function handleCategorizationFeedback(
   selectedProjectId: string,
   suggestedProjectId: string | null,
   userId: string
-): Promise<void> {
+): Promise<{ created: number; updated: number }> {
   try {
     // Fetch the event with all its data
     const event = await prisma.calendarEvent.findUnique({
@@ -95,7 +95,7 @@ export async function handleCategorizationFeedback(
 
     if (!event) {
       console.error('[Learning] Event not found:', eventId)
-      return
+      return { created: 0, updated: 0 }
     }
 
     // Convert to CalendarEventInput format
@@ -110,15 +110,23 @@ export async function handleCategorizationFeedback(
     // Extract patterns from the event
     const patterns = extractPatternsFromEvent(eventInput)
 
+    let totalUpdated = 0
+
     // Scenario 1: User rejected suggestion (suggested different project)
     if (suggestedProjectId && suggestedProjectId !== selectedProjectId) {
       // Penalize rules that led to wrong suggestion
-      await penalizeIncorrectRules(prisma, userId, patterns, suggestedProjectId)
+      const penaltyResult = await penalizeIncorrectRules(prisma, userId, patterns, suggestedProjectId)
+      totalUpdated += penaltyResult.updated
     }
 
     // Scenario 2 & 3: Always strengthen rules for the correct project
     // (whether suggestion was accepted or user manually categorized)
-    await strengthenRules(prisma, userId, patterns, selectedProjectId, eventInput)
+    const strengthenResult = await strengthenRules(prisma, userId, patterns, selectedProjectId, eventInput)
+
+    return {
+      created: strengthenResult.created,
+      updated: totalUpdated + strengthenResult.updated,
+    }
 
   } catch (error) {
     console.error('[Learning] Feedback handling error:', error, {
@@ -127,6 +135,7 @@ export async function handleCategorizationFeedback(
       suggestedProjectId,
       userId,
     })
+    return { created: 0, updated: 0 }
   }
 }
 
@@ -141,6 +150,7 @@ export async function handleCategorizationFeedback(
  * @param patterns - Extracted patterns from event
  * @param projectId - Correct project ID
  * @param event - Calendar event (for lastMatchedAt timestamp)
+ * @returns Object with counts of created and updated rules
  *
  * @example
  * ```typescript
@@ -149,7 +159,8 @@ export async function handleCategorizationFeedback(
  *   { ruleType: 'ATTENDEE_EMAIL', condition: 'team@acme.com' },
  * ]
  *
- * await strengthenRules(prisma, userId, patterns, projectId, event)
+ * const result = await strengthenRules(prisma, userId, patterns, projectId, event)
+ * // Returns: { created: 1, updated: 1 }
  * // Creates or updates rules:
  * // - ATTENDEE_EMAIL: "team@acme.com" → projectId (higher priority)
  * // - TITLE_KEYWORD: "standup" → projectId (lower priority)
@@ -163,11 +174,11 @@ export async function strengthenRules(
   // @ts-expect-error - Reserved for future use
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   event: CalendarEventInput
-): Promise<void> {
+): Promise<{ created: number; updated: number }> {
   try {
     if (patterns.length === 0) {
       console.warn('[Learning] No patterns to strengthen')
-      return
+      return { created: 0, updated: 0 }
     }
 
     // Sort patterns by priority (highest first)
@@ -176,9 +187,24 @@ export async function strengthenRules(
     })
 
     const now = new Date()
+    let created = 0
+    let updated = 0
 
     // Process each pattern
     for (const pattern of sortedPatterns) {
+      // Check if rule exists before upserting
+      const existingRule = await prisma.categoryRule.findUnique({
+        where: {
+          userId_ruleType_condition_projectId: {
+            userId,
+            ruleType: pattern.ruleType,
+            condition: pattern.condition,
+            projectId,
+          },
+        },
+        select: { id: true },
+      })
+
       // Use upsert to create or update the rule
       await prisma.categoryRule.upsert({
         where: {
@@ -212,6 +238,13 @@ export async function strengthenRules(
           lastMatchedAt: now,
         },
       })
+
+      // Track whether this was a create or update
+      if (existingRule) {
+        updated++
+      } else {
+        created++
+      }
     }
 
     // After upserting, we need to cap confidence at 95%
@@ -224,12 +257,15 @@ export async function strengthenRules(
         AND "confidenceScore" > ${LEARNING_CONFIG.maxConfidence}
     `
 
+    return { created, updated }
+
   } catch (error) {
     console.error('[Learning] Rule strengthening error:', error, {
       userId,
       projectId,
       patternCount: patterns.length,
     })
+    return { created: 0, updated: 0 }
   }
 }
 
@@ -243,6 +279,7 @@ export async function strengthenRules(
  * @param userId - User ID
  * @param patterns - Extracted patterns from event
  * @param wrongProjectId - Project ID that was incorrectly suggested
+ * @returns Object with count of updated rules
  *
  * @example
  * ```typescript
@@ -251,7 +288,8 @@ export async function strengthenRules(
  *   { ruleType: 'ATTENDEE_EMAIL', condition: 'john@acme.com' },
  * ]
  *
- * await penalizeIncorrectRules(prisma, userId, patterns, 'wrong_proj_123')
+ * const result = await penalizeIncorrectRules(prisma, userId, patterns, 'wrong_proj_123')
+ * // Returns: { updated: 2 }
  * // Finds rules that match these patterns + wrongProjectId
  * // Decreases their confidence by 10%, minimum 30%
  * ```
@@ -261,11 +299,11 @@ export async function penalizeIncorrectRules(
   userId: string,
   patterns: ExtractedPattern[],
   wrongProjectId: string
-): Promise<void> {
+): Promise<{ updated: number }> {
   try {
     if (patterns.length === 0) {
       console.warn('[Learning] No patterns to penalize')
-      return
+      return { updated: 0 }
     }
 
     // Find all rules that match the patterns and wrong project
@@ -282,7 +320,7 @@ export async function penalizeIncorrectRules(
 
     if (incorrectRules.length === 0) {
       console.warn('[Learning] No incorrect rules found to penalize')
-      return
+      return { updated: 0 }
     }
 
     // Update each rule: decrease confidence by 10%, floor at 30%
@@ -313,12 +351,15 @@ export async function penalizeIncorrectRules(
       wrongProjectId,
     })
 
+    return { updated: incorrectRules.length }
+
   } catch (error) {
     console.error('[Learning] Rule penalization error:', error, {
       userId,
       wrongProjectId,
       patternCount: patterns.length,
     })
+    return { updated: 0 }
   }
 }
 

@@ -165,12 +165,6 @@ export const authRouter = router({
    * at /api/auth/callback/google. Keeping for compatibility but may be deprecated.
    */
   googleCallback: publicProcedure
-    .input(
-      z.object({
-        code: z.string().optional(),
-        state: z.string().optional(),
-      })
-    )
     .mutation(async ({ ctx }) => {
       // Better-Auth handles OAuth callback automatically via its built-in routes
       // This endpoint is here for compatibility but may not be actively used

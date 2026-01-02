@@ -10,12 +10,18 @@ for (const envVar of requiredEnvVars) {
   }
 }
 
+
 // Preserve existing Argon2 configuration from previous implementation
 const argon2Options: Options = {
   memoryCost: 19456,
   timeCost: 2,
   outputLen: 32,
   parallelism: 1,
+}
+
+const secret = process.env.BETTER_AUTH_SECRET || process.env.SESSION_SECRET
+if (!secret) {
+  throw new Error('Missing required environment variable: BETTER_AUTH_SECRET or SESSION_SECRET')
 }
 
 export const auth = betterAuth({
@@ -55,7 +61,7 @@ export const auth = betterAuth({
     updateAge: 60 * 60 * 24,        // Refresh session after 1 day of activity
   },
 
-  secret: process.env.BETTER_AUTH_SECRET || process.env.SESSION_SECRET!,
+  secret,
   baseURL: process.env.API_URL || "http://localhost:3001",
 })
 

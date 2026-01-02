@@ -56,7 +56,7 @@ pnpm dev:api          # Backend only (port 3001)
 ```
 
 ### Environment Variables
-See `.env`: DATABASE_URL (Neon), REDIS_URL (Upstash), BETTER_AUTH_SECRET (or SESSION_SECRET), ENCRYPTION_KEY, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, API_URL (for OAuth redirects)
+See `.env`: DATABASE_URL (Neon), REDIS_URL (Upstash), BETTER_AUTH_SECRET (falls back to SESSION_SECRET if not set), ENCRYPTION_KEY, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, API_URL (for OAuth redirects)
 
 ### Database Commands
 ```bash
@@ -418,10 +418,12 @@ pnpm db:seed          # Seed AI test data
 - All users must re-login after deployment
 - Users must reconnect Google Calendar (OAuth tokens stored in new Account table)
 - Email verification now required for new signups
+- Migration SQL available at: `packages/database/prisma/migrations/20251229_migrate_to_better_auth/migration.sql`
 
 **Session Management:**
 - Configured 30-day session expiration via Better-Auth (`apps/api/src/auth/better-auth.ts:54`)
-- Sessions automatically refresh after 1 day of activity (`updateAge: 60 * 60 * 24`)
+- Sessions automatically update their expiry after 1 day of activity (`updateAge: 60 * 60 * 24`)
+- This means the 30-day expiration extends every time the user is active after 24 hours
 - Better-Auth handles session validation and cookie management automatically
 - Sessions stored with metadata: IP address, user agent, session token
 
@@ -434,6 +436,7 @@ pnpm db:seed          # Seed AI test data
 
 **OAuth Token Management:**
 - Better-Auth automatically handles token refresh via its built-in refresh mechanism
+- Token retrieval delegated to `auth.api.getAccessToken()` in calendar sync operations
 - OAuth credentials stored in Account table with proper encryption
 - Token refresh integrated into calendar sync operations
 - Graceful error handling for expired or revoked tokens
@@ -444,12 +447,13 @@ pnpm db:seed          # Seed AI test data
 - Added Account table for OAuth providers (stores tokens, refresh tokens, scopes)
 - Added Verification table for email verification codes
 - Removed OAuthState table (Better-Auth handles state internally)
+- Removed token fields from CalendarConnection (`accesToken`, `refreshToken`, `expiresAt`) - tokens now stored in Account table
 - CalendarConnection now stores only metadata (timezone, selected calendars)
 
 **Code Improvements:**
 - Simplified context.ts - uses `auth.api.getSession()` for validation
 - Type-safe auth router using Better-Auth API methods
-- Enhanced error handling with Better-Auth error codes (USER_ALREADY_EXISTS, etc.)
+- Enhanced error handling with Better-Auth APIError types (USER_ALREADY_EXISTS, INVALID_EMAIL_OR_PASSWORD, etc)
 - Removed custom OAuth callback handler (Better-Auth provides this)
 - Added `calendar.connect` endpoint to link Better-Auth Account to CalendarConnection
 
@@ -467,6 +471,15 @@ pnpm db:seed          # Seed AI test data
 - `apps/api/src/routers/calendar.ts` - Added connect endpoint for OAuth linking
 - `apps/api/src/auth/token-refresh.ts` - Updated to use Better-Auth Account table
 - `packages/database/prisma/schema.prisma` - Better-Auth schema integration
+
+**Post-Migration Verification**
+- [ ] Users can sign up with email verification
+- [ ] Users can log in with email/password
+- [ ] Google OAuth flow completesv successfully
+- [ ] Calendar connection links to Better-Auth Account
+- [ ] Calendar sync retrieves token from Account table
+- [ ] Sessions expire after 30 days
+- [ ] Environment variables (BETTER_AUTH_SECRET, API_URL) configured
 
 ### 📤 RM Integration Phase 3: Manual Sync - Complete (2025-12-10)
 
@@ -783,8 +796,8 @@ apps/web/src/pages/TimesheetGrid.tsx     [MODIFIED] Added RMSyncButton integrati
 - Better-Auth handles session validation, cookie management, and OAuth flows
 - Email/password with Argon2 hashing + email verification
 - Google OAuth 2.0 with offline access for refresh tokens
-- OAuth tokens stored encrypted in Account table (via Better-Auth)
-- Session cookies: httpOnly, sameSite (lax), 30-day expiration
+- OAuth tokens stored in Account table, encrypted via Prisma middleware (AES-256-GCM)
+- Session cookies: httpOnly, sameSite ('lax' in dev, 'none' in production for cross-origin), secure in production, 30-day expiration
 - Generic error messages prevent info disclosure
 - Vite proxy enables same-origin cookies during development
 

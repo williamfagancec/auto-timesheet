@@ -59,7 +59,6 @@ export const projectRouter = router({
       // Get all projects
       const projects = await prisma.project.findMany({
         where: whereClause,
-        take: input.limit,
       })
 
       // Get all project IDs
@@ -120,7 +119,8 @@ export const projectRouter = router({
         sortedProjects.sort((a, b) => b.hours30Days - a.hours30Days)
       }
 
-      return sortedProjects
+      // Apply limit after sorting
+      return input.limit ? sortedProjects.slice(0, input.limit) : sortedProjects
     }),
 
   /**
@@ -176,24 +176,21 @@ export const projectRouter = router({
     )
     
     .mutation(async ({ ctx, input }) => {
-      // Verify project exists and belongs to user
-      const project = await prisma.project.findUnique({
-        where: { id: input.id },
+      // Verify project exists and belongs to user in one query
+      const project = await prisma.project.findFirst({
+        where: {
+          id: input.id,
+          userId: ctx.user.id,
+        },
       })
 
       if (!project) {
         throw new TRPCError({
           code: 'NOT_FOUND',
-          message: 'Project not found',
+          message: 'Project not found or access denied',
         })
       }
 
-      if (project.userId !== ctx.user.id) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'You do not have permission to modify this project',
-        })
-      }
 
       // Check for duplicate name (excluding current project)
       const duplicateProject = await prisma.project.findFirst({

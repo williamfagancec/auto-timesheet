@@ -229,13 +229,8 @@ export const suggestionsRouter = router({
           }
         }
 
-        // Get rules BEFORE feedback (for counting)
-        const rulesBefore = await prisma.categoryRule.count({
-          where: { userId: ctx.user.id },
-        })
-
         // Call LearningService to handle feedback
-        await handleCategorizationFeedback(
+        const feedbackResult = await handleCategorizationFeedback(
           prisma,
           input.eventId,
           input.selectedProjectId,
@@ -273,17 +268,9 @@ export const suggestionsRouter = router({
           }
         }
 
-        // Get rules AFTER feedback (for counting)
-        const rulesAfter = await prisma.categoryRule.count({
-          where: { userId: ctx.user.id },
-        })
-
-        const rulesCreated = rulesAfter - rulesBefore
-        const rulesUpdated = rulesCreated > 0 ? 0 : 1 // If no new rules, assume existing were updated
-
         return {
-          rulesCreated,
-          rulesUpdated,
+          rulesCreated: feedbackResult.created,
+          rulesUpdated: feedbackResult.updated,
         }
       } catch (error) {
         // Re-throw TRPCError as-is

@@ -7,10 +7,10 @@ import { router, protectedProcedure } from "../lib/trpc";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { prisma } from "database";
-import * as RMConnection from "../../services/rm-connection";
-import { rmApi } from "../../services/rm-api";
-import { suggestMatches, getAutoMapSuggestions } from "../../services/rm-project-matching";
-import * as RMSync from "../../services/rm-sync";
+import * as RMConnection from "../../api/src/services/rm-connection";
+import { rmApi } from "../../api/src/services/rm-api";
+import { suggestMatches, getAutoMapSuggestions } from "../../api/src/services/rm-project-matching";
+import * as RMSync from "../../api/src/services/rm-sync";
 
 /**
  * Zod Schemas
@@ -137,9 +137,16 @@ export const rmRouter = router({
           success: true,
         };
       } catch (error) {
+        // Only treat "not found" errors as NOT_FOUND
+        if (error instanceof Error && error.message.includes("not found")) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "RM connection not found",
+          });
+        }
         throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "RM connection not found",
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to delete RM connection",
         });
       }
     }),

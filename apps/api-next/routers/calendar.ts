@@ -2,8 +2,8 @@ import { router, protectedProcedure } from '../lib/trpc'
 import { z } from 'zod'
 import { prisma } from 'database'
 import { TRPCError } from '@trpc/server'
-import { listGoogleCalendars } from '../../services/google-calendar.js'
-import { syncUserEvents } from '../../services/calendar-sync.js'
+import { listGoogleCalendars, type GoogleCalendar } from '../../api/src/services/google-calendar.js'
+import { syncUserEvents } from '../../api/src/services/calendar-sync.js'
 
 export const calendarRouter = router({
   /**
@@ -76,7 +76,7 @@ export const calendarRouter = router({
       const accessToken = await getValidAccessToken(ctx.user.id, 'google')
 
       // Detect user's timezone from Google Calendar
-      const { getUserTimezone } = await import('../services/google-calendar.js')
+      const { getUserTimezone } = await import('../../api/src/services/google-calendar.js')
       const timezone = await getUserTimezone(accessToken)
 
       // Create CalendarConnection
@@ -97,15 +97,16 @@ export const calendarRouter = router({
       console.error('[Calendar Connect] Failed to connect calendar:', error)
 
       // Surface specific errors for better UX
-      if (error instanceof Error)
- {
-  if (error.message.includes('TOKEN_REFRESH_FAILED') || error.message.includes('re-authenticate')) {
-    throw new TRPCError({
-      code: 'UNAUTHORIZED',
-      messsage: 'Google authentication expired. Please sign in with Google again.'
-    })
-  }
- }     throw new TRPCError({
+      if (error instanceof Error) {
+        if (error.message.includes('TOKEN_REFRESH_FAILED') || error.message.includes('re-authenticate')) {
+          throw new TRPCError({
+            code: 'UNAUTHORIZED',
+            message: 'Google authentication expired. Please sign in with Google again.',
+          })
+        }
+      }
+
+      throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
         message: 'Failed to connect Google Calendar. Please try again.',
       })
@@ -173,7 +174,7 @@ export const calendarRouter = router({
       // Validate that all calendar IDs belong to the user
       try {
         const availableCalendars = await listGoogleCalendars(ctx.user.id)
-        const availableCalendarIds = new Set(availableCalendars.map((cal) => cal.id))
+        const availableCalendarIds = new Set(availableCalendars.map((cal: GoogleCalendar) => cal.id))
 
         const invalidIds = input.calendarIds.filter((id) => !availableCalendarIds.has(id))
 

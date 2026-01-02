@@ -136,7 +136,7 @@ export class SuggestionEngine {
     const events = await this.prisma.calendarEvent.findMany({ where: { id: { in: eventIds }, userId } })
 
     // Build map of id->event for lookup
-    const eventById = new Map(events.map((e: any) => [e.id, e]))
+    const eventById = new Map<string, any>(events.map((e: any) => [e.id, e]))
 
     // Load rules once via the cache
     const rules = await this.ruleCache.getRulesForUser(userId, this.prisma)
