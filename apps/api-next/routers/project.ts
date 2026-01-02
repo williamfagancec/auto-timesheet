@@ -120,6 +120,8 @@ export const projectRouter = router({
       }
 
       // Apply limit after sorting
+      // Note: For hours30Days, we must sort in-memory after calculation
+      // For other fields, we could optimize with DB-level sorting + limit
       return input.limit ? sortedProjects.slice(0, input.limit) : sortedProjects
     }),
 
@@ -233,24 +235,21 @@ export const projectRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      // Verify project exists and belongs to user
-      const project = await prisma.project.findUnique({
-        where: { id: input.id },
-      })
+        // Verify project exists and belongs to user in one query
+        const project = await prisma.project.findFirst({
+          where: {
+            id: input.id,
+            userId: ctx.user.id,
+          },
+        })
 
       if (!project) {
         throw new TRPCError({
           code: 'NOT_FOUND',
-          message: 'Project not found',
+          message: 'Project not found or access denied',
         })
       }
 
-      if (project.userId !== ctx.user.id) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'You do not have permission to modify this project',
-        })
-      }
 
       // Update archive status
       const updatedProject = await prisma.project.update({

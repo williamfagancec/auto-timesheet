@@ -10,9 +10,24 @@ for (const envVar of requiredEnvVars) {
   }
 }
 
-// Using bcrypt for password hashing (Next.js compatible)
-// Switched from Argon2 due to Next.js webpack compatibility issues with native binaries
-const BCRYPT_ROUNDS = 12 // Strong security: 12 rounds ~250ms per hash
+/**
+ * Password Hashing Configuration
+ *
+ * Using bcrypt with 12 rounds for Next.js compatibility. While bcrypt provides acceptable
+ * security (~250ms per hash, resistant to brute force attacks), Argon2id would offer
+ * superior resistance to GPU/ASIC attacks due to its memory-hard properties, which make
+ * parallel cracking significantly more expensive.
+ *
+ * Tradeoff rationale:
+ * - bcrypt chosen to avoid Next.js native binary externals configuration complexity
+ * - 12 rounds balances security with user experience for typical authentication workloads
+ * - Still meets OWASP recommendations for password hashing (10+ rounds minimum)
+ * - Suitable for web application authentication where network latency dominates UX
+ *
+ * Security note: For high-security applications or those expecting targeted attacks,
+ * consider migrating to Argon2id once Next.js/webpack native module support improves.
+ */
+const BCRYPT_ROUNDS = 12
 
 const secret = process.env.BETTER_AUTH_SECRET || process.env.SESSION_SECRET
 if (!secret) {

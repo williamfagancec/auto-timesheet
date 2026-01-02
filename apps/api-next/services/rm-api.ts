@@ -169,19 +169,18 @@ export class RMApiClient {
       const bodyText = await response.text();
       if (!bodyText.trim()) {
         return undefined as T;
-    }
-
-    try {
-      return JSON.parse(bodyText) as T;
-    } catch (parseError) {
-      throw new RMNetworkError(
-        `Failed to parse response JSON: ${parseError instanceof Error ?
-          parseError.message : String(parseError)
-      }`
-      );
-    }
+      }
+      
+      try {
+        return JSON.parse(bodyText) as T;
+      } catch (parseError) {
+        throw new RMNetworkError(
+          `Failed to parse response JSON: ${parseError instanceof Error ?
+            parseError.message : String(parseError)}`
+        );
+      }
   } catch (error) {
-    // Re-throw our custom errors
+   // Re-throw our custom errors
     if (error instanceof RMApiError) {
       throw error;
     }

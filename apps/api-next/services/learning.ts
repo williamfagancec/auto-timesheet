@@ -598,6 +598,7 @@ export async function getDebugInfo(
     condition: string
     projectId: string
     projectName: string
+    projectArchived: boolean
     confidenceScore: number
     accuracy: number
     matchCount: number

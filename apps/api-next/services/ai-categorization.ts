@@ -10,6 +10,7 @@
 import { PrismaClient, CategoryRule, Project } from '@prisma/client'
 import { AI_CONFIG } from 'config'
 import { CategoryRuleType } from 'shared'
+import { updateRuleAccuracy as updateRuleAccuracyFromLearning } from './learning'
 
 /**
  * Calendar event data structure for AI processing
@@ -553,6 +554,9 @@ export async function getSuggestionsForEvent(
 // =============================================================================
 
 /**
+ * @deprecated This function is a non-functional stub and will throw an error if called.
+ * Use `handleCategorizationFeedback` from `services/learning` instead.
+ *
  * Learn from user categorization by creating or updating CategoryRule records.
  *
  * Called when a user categorizes an event (manually or by accepting suggestion).
@@ -564,15 +568,19 @@ export async function getSuggestionsForEvent(
  * @param projectId - Project ID that was assigned
  * @param wasAutoSuggestion - Whether user accepted an AI suggestion (affects initial accuracy)
  *
+ * @throws {Error} Always throws - use handleCategorizationFeedback instead
+ *
  * @example
  * ```typescript
+ * // DEPRECATED - DO NOT USE
  * await learnFromCategorization(prisma, userId, event, projectId, true)
- * // Creates/updates rules:
- * // - TITLE_KEYWORD: "standup" → projectId
- * // - ATTENDEE_EMAIL: "team@company.com" → projectId
- * // - CALENDAR_NAME: "primary" → projectId
+ *
+ * // USE THIS INSTEAD:
+ * import { handleCategorizationFeedback } from './learning'
+ * await handleCategorizationFeedback(prisma, eventId, selectedProjectId, suggestedProjectId, userId)
  * ```
  *
+ * @see services/learning.ts handleCategorizationFeedback for the real implementation
  * @see docs/AI_ENGINE.md Phase 5: Learning & Feedback
  */
 export async function learnFromCategorization(
@@ -582,13 +590,13 @@ export async function learnFromCategorization(
   _projectId: string,
   _wasAutoSuggestion: boolean
 ): Promise<void> {
-  // TODO: Implement in Phase 5
-  // 1. Extract patterns from event (title, attendees, calendar, recurring)
-  // 2. For each pattern:
-  //    - Check if rule already exists
-  //    - If exists: update matchCount
-  //    - If not: create new rule
-  // 3. If wasAutoSuggestion, boost initial accuracy
+  // This function is deprecated and not implemented
+  // Use handleCategorizationFeedback from './learning' instead
+  throw new Error(
+    'learnFromCategorization is a deprecated stub. ' +
+    'Use handleCategorizationFeedback(prisma, eventId, selectedProjectId, suggestedProjectId, userId) ' +
+    'from services/learning instead. See learning.ts for implementation details.'
+  )
 }
 
 /**
@@ -613,13 +621,12 @@ export async function learnFromCategorization(
  * @see docs/AI_ENGINE.md Phase 5: Learning & Feedback
  */
 export async function updateRuleAccuracy(
-  _prisma: PrismaClient,
-  _ruleId: string,
-  _wasAccepted: boolean
+  prisma: PrismaClient,
+  ruleId: string,
+  wasAccepted: boolean
 ): Promise<void> {
-  // TODO: Implement in Phase 5
-  // Formula: newAccuracy = (accuracy * matchCount + (wasAccepted ? 1 : 0)) / (matchCount + 1)
-  // Also update: matchCount++, totalSuggestions++, lastMatchedAt
+  // Delegate to the real implementation in learning.ts
+  return updateRuleAccuracyFromLearning(prisma, ruleId, wasAccepted)
 }
 
 // =============================================================================

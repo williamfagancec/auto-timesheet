@@ -475,7 +475,7 @@ pnpm db:seed          # Seed AI test data
 **Post-Migration Verification**
 - [ ] Users can sign up with email verification
 - [ ] Users can log in with email/password
-- [ ] Google OAuth flow completesv successfully
+- [ ] Google OAuth flow completes successfully
 - [ ] Calendar connection links to Better-Auth Account
 - [ ] Calendar sync retrieves token from Account table
 - [ ] Sessions expire after 30 days

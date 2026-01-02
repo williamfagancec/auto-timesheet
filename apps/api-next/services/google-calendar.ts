@@ -107,7 +107,7 @@ export async function fetchCalendarEvents(
   calendarId: string,
   timeMin: Date,
   timeMax: Date
-) {
+): Promise<{ items: GoogleCalendarEvent[] }> {
   let accessToken: string
   try {
     accessToken = await getValidAccessToken(userId, 'google')
@@ -168,7 +168,7 @@ export async function fetchCalendarEvents(
       throw new Error(errorMessage)
     }
 
-    return response.json()
+    return await response.json()
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error('REQUEST_TIMEOUT: Request to Google Calendar API timed out. Please check your internet connection.')
