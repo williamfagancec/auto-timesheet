@@ -124,15 +124,15 @@ importers:
 
   apps/api-next:
     dependencies:
-      '@node-rs/argon2':
-        specifier: ^2.0.2
-        version: 2.0.2
       '@trpc/client':
         specifier: ^11.0.0
         version: 11.7.1(@trpc/server@11.7.1)(typescript@5.9.3)
       '@trpc/server':
         specifier: ^11.0.0
         version: 11.7.1(typescript@5.9.3)
+      bcryptjs:
+        specifier: ^3.0.3
+        version: 3.0.3
       better-auth:
         specifier: ^1.4.9
         version: 1.4.9(@prisma/client@5.22.0)(next@14.2.35)(react-dom@18.3.1)(react@18.3.1)
@@ -161,6 +161,9 @@ importers:
         specifier: ^3.22.4
         version: 3.25.76
     devDependencies:
+      '@types/bcryptjs':
+        specifier: ^3.0.0
+        version: 3.0.0
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.24
@@ -2808,6 +2811,13 @@ packages:
       '@babel/types': 7.28.5
     dev: true
 
+  /@types/bcryptjs@3.0.0:
+    resolution: {integrity: sha512-WRZOuCuaz8UcZZE4R5HXTco2goQSI2XxjGY3hbM/xDvwmqFWd4ivooImsMx65OKM6CtNKbnZ5YL+YwAwK7c1dg==}
+    deprecated: This is a stub types definition. bcryptjs provides its own type definitions, so you do not need this installed.
+    dependencies:
+      bcryptjs: 3.0.3
+    dev: true
+
   /@types/chai@5.2.3:
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
     dependencies:
@@ -3233,6 +3243,10 @@ packages:
 
   /baseline-browser-mapping@2.8.23:
     resolution: {integrity: sha512-616V5YX4bepJFzNyOfce5Fa8fDJMfoxzOIzDCZwaGL8MKVpFrXqfNUoIpRn9YMI5pXf/VKgzjB4htFMsFKKdiQ==}
+    hasBin: true
+
+  /bcryptjs@3.0.3:
+    resolution: {integrity: sha512-GlF5wPWnSa/X5LKM1o0wz0suXIINz1iHRLvTS+sLyi7XPbe5ycmYI3DlZqVGZZtDgl4DmasFg7gOB3JYbphV5g==}
     hasBin: true
 
   /better-auth@1.4.9(@prisma/client@5.22.0)(next@14.2.35)(react-dom@18.3.1)(react@18.3.1):

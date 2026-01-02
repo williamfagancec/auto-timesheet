@@ -2,8 +2,8 @@ import { router, protectedProcedure } from '../lib/trpc'
 import { z } from 'zod'
 import { prisma } from 'database'
 import { TRPCError } from '@trpc/server'
-import { listGoogleCalendars, type GoogleCalendar } from '../../api/src/services/google-calendar.js'
-import { syncUserEvents } from '../../api/src/services/calendar-sync.js'
+import { listGoogleCalendars, type GoogleCalendar } from '../services/google-calendar'
+import { syncUserEvents } from '../services/calendar-sync'
 
 export const calendarRouter = router({
   /**
@@ -72,11 +72,11 @@ export const calendarRouter = router({
 
     // Get access token to verify connection and detect timezone
     try {
-      const { getValidAccessToken } = await import('../auth/token-refresh.js')
+      const { getValidAccessToken } = await import('../auth/token-refresh')
       const accessToken = await getValidAccessToken(ctx.user.id, 'google')
 
       // Detect user's timezone from Google Calendar
-      const { getUserTimezone } = await import('../../api/src/services/google-calendar.js')
+      const { getUserTimezone } = await import('../services/google-calendar')
       const timezone = await getUserTimezone(accessToken)
 
       // Create CalendarConnection

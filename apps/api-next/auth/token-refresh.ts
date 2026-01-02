@@ -1,4 +1,4 @@
-import { auth } from './better-auth.js'
+import { auth } from './better-auth'
 import { prisma } from 'database'
 
 /**

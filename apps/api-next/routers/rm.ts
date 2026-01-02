@@ -7,10 +7,10 @@ import { router, protectedProcedure } from "../lib/trpc";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { prisma } from "database";
-import * as RMConnection from "../../api/src/services/rm-connection";
-import { rmApi } from "../../api/src/services/rm-api";
-import { suggestMatches, getAutoMapSuggestions } from "../../api/src/services/rm-project-matching";
-import * as RMSync from "../../api/src/services/rm-sync";
+import * as RMConnection from "../services/rm-connection";
+import { rmApi } from "../services/rm-api";
+import { suggestMatches, getAutoMapSuggestions } from "../services/rm-project-matching";
+import * as RMSync from "../services/rm-sync";
 
 /**
  * Zod Schemas

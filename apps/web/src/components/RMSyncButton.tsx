@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { format, endOfWeek } from 'date-fns'
 import { trpc } from '../lib/trpc'
-import type { AppRouter } from 'api/router'
+import type { AppRouter } from 'api-next/routers'  // Updated from 'api/router' to use Next.js backend
 import { inferRouterOutputs } from '@trpc/server'
 
 type RouterOutput = inferRouterOutputs<AppRouter>

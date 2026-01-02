@@ -2,12 +2,12 @@ import { router, protectedProcedure } from '../lib/trpc'
 import { z } from 'zod'
 import { prisma } from 'database'
 import { TRPCError } from '@trpc/server'
-import { getSuggestionsForEvent } from '../../api/src/services/ai-categorization.js'
+import { getSuggestionsForEvent } from '../services/ai-categorization'
 import {
   handleCategorizationFeedback,
   getDebugInfo,
-} from '../../api/src/services/learning.js'
-import { logSuggestion, type SuggestionOutcome } from '../../api/src/services/analytics.js'
+} from '../services/learning'
+import { logSuggestion, type SuggestionOutcome } from '../services/analytics'
 
 // =============================================================================
 // INPUT SCHEMAS

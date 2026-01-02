@@ -1,7 +1,7 @@
 import { betterAuth } from "better-auth"
 import { prismaAdapter } from "better-auth/adapters/prisma"
 import { prisma } from "database"
-import { hash, verify, type Options } from "@node-rs/argon2"
+import bcrypt from "bcryptjs"
 
 const requiredEnvVars = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'] as const
 for (const envVar of requiredEnvVars) {
@@ -10,14 +10,9 @@ for (const envVar of requiredEnvVars) {
   }
 }
 
-
-// Preserve existing Argon2 configuration from previous implementation
-const argon2Options: Options = {
-  memoryCost: 19456,
-  timeCost: 2,
-  outputLen: 32,
-  parallelism: 1,
-}
+// Using bcrypt for password hashing (Next.js compatible)
+// Switched from Argon2 due to Next.js webpack compatibility issues with native binaries
+const BCRYPT_ROUNDS = 12 // Strong security: 12 rounds ~250ms per hash
 
 const secret = process.env.BETTER_AUTH_SECRET || process.env.SESSION_SECRET
 if (!secret) {
@@ -33,9 +28,9 @@ export const auth = betterAuth({
     enabled: true,
     requireEmailVerification: true,  // User requested email verification
     password: {
-      hash: async (password) => await hash(password, argon2Options),
+      hash: async (password) => await bcrypt.hash(password, BCRYPT_ROUNDS),
       verify: async ({ hash: hashedPassword, password }) =>
-        await verify(hashedPassword, password, argon2Options),
+        await bcrypt.compare(password, hashedPassword),
     },
   },
 
