@@ -128,6 +128,8 @@ export const rmRouter = router({
     /**
      * Delete RM connection
      * Removes connection and all related data (cascades to mappings, synced entries, logs)
+     *
+     * Idempotent: succeeds even if no connection exists
      */
     delete: protectedProcedure.mutation(async ({ ctx }) => {
       try {
@@ -137,13 +139,6 @@ export const rmRouter = router({
           success: true,
         };
       } catch (error) {
-        // Only treat "not found" errors as NOT_FOUND
-        if (error instanceof Error && error.message.includes("not found")) {
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "RM connection not found",
-          });
-        }
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: "Failed to delete RM connection",

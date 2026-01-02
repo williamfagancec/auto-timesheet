@@ -166,9 +166,11 @@ export async function validateConnection(userId: string): Promise<boolean> {
 /**
  * Delete RM connection and all related data
  * Cascade deletes project mappings, synced entries, and sync logs
+ *
+ * Idempotent: safe to call even if no connection exists
  */
 export async function deleteConnection(userId: string): Promise<void> {
-  await prisma.rMConnection.delete({
+  await prisma.rMConnection.deleteMany({
     where: { userId },
   });
 }

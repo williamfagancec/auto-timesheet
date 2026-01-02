@@ -1,5 +1,5 @@
 import { prisma } from 'database'
-import createDefaultSuggestionEngine from './suggestion-factory'
+import { createDefaultSuggestionEngine }from './suggestion-factory'
 import { getValidAccessToken } from '../auth/token-refresh'
 import { zonedTimeToUtc } from 'date-fns-tz'
 
@@ -227,8 +227,10 @@ export async function saveEventsToDatabase(
         console.log(`Splitting multi-day timed event ${event.id}`)
         const segments = splitMultiDayEvent(startTime, endTime)
 
-        // First, delete any existing segments that are no longer valid
-        await prisma.calendarEvent.deleteMany({
+      // First, delete any existing segments that are no longer valid
+      await prisma.$transaction(async (tx) => {
+        // Delete existing segments
+        await tx.calendarEvent.deleteMany({
           where: {
             userId,
             googleEventId: event.id,
@@ -237,25 +239,27 @@ export async function saveEventsToDatabase(
 
         // Create new segments
         for (const segment of segments) {
-          await prisma.calendarEvent.create({
+          await tx.calendarEvent.create({
             data: {
               userId,
               googleEventId: event.id,
               calendarId,
               title: event.summary || 'Untitled',
-              startTime: segment.startTime,
+              startTime: segment.startTime,e
               endTime: segment.endTime,
-              attendees: event.attendees ? (structuredClone(event.attendees) as any) : undefined,
+              attendees: event.attendees ? (structuredClone(event.attendees) as any) :
+undefined,
               location: event.location || null,
               status,
-              isAllDay: false, // Multi-day splits are not all-day events
+              isAllday: false, // Multi-day splits are not all-day events
               splitIndex: segment.splitIndex,
             },
           })
-          created++
-          // created record has googleEventId + splitIndex — we don't have id here; record the googleEventId
-          affectedEventIds.push(event.id)
         }
+      })
+      created += segments.length
+      // created record has googleEventId + splitIndex - we don't have id here; record the googleEventId
+      affectedEventIds.push(event.id)
       } else {
         // Single-day event - normal upsert
         const existing = await prisma.calendarEvent.findFirst({

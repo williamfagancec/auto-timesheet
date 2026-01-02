@@ -487,6 +487,177 @@ export async function previewSync(
 }
 
 /**
+ * Helper function to sync an aggregate to RM
+ * Performs the RM API call, updates/creates rMSyncedEntry, and manages component records
+ * 
+ * @param token - Decrypted RM API token
+ * @param rmUserId - RM user ID
+ * @param mapping - Project mapping
+ * @param aggregate - Aggregated entry to sync
+ * @param existingSyncedEntry - Existing synced entry (if any)
+ * @returns Object with rmEntry, action, and syncedEntryId
+ * @throws Error if sync fails (to be handled by caller)
+ */
+async function syncAggregateToRM(
+  token: string,
+  rmUserId: number,
+  mapping: { id: string; rmProjectId: number },
+  aggregate: {
+    date: Date;
+    totalHours: number;
+    notes: string | null;
+    isBillable: boolean;
+    aggregateHash: string;
+    contributingEntries: Array<{
+      id: string;
+      duration: number;
+      isBillable: boolean;
+      notes: string | null;
+    }>;
+  },
+  existingSyncedEntry: { id: string; rmEntryId: bigint } | null
+): Promise<{ rmEntry: { id: number }; action: "created" | "updated"; syncedEntryId: string }> {
+  const dateStr = aggregate.date.toISOString().split("T")[0];
+
+  // Prepare RM API payload with billable status
+  const rmPayload = {
+    assignable_id: mapping.rmProjectId,
+    date: dateStr,
+    hours: aggregate.totalHours,
+    notes: aggregate.notes || undefined,
+    task: mapBillableToTask(aggregate.isBillable),
+  };
+
+  let rmEntry: { id: number };
+  let action: "created" | "updated";
+  let syncedEntryId: string;
+
+  if (existingSyncedEntry) {
+    // Update existing entry in RM
+    console.log('[RM Sync] Updating RM entry:', {
+      rmEntryId: existingSyncedEntry.rmEntryId,
+      ...rmPayload,
+    });
+
+    try {
+      rmEntry = await rmApi.updateTimeEntry(
+        token,
+        rmUserId,
+        Number(existingSyncedEntry.rmEntryId),
+        rmPayload
+      );
+      action = "updated";
+      syncedEntryId = existingSyncedEntry.id;
+
+      // Update synced entry record
+      await prisma.rMSyncedEntry.update({
+        where: { id: syncedEntryId },
+        data: {
+          rmEntryId: rmEntry.id,
+          lastSyncedAt: new Date(),
+          lastSyncedHash: aggregate.aggregateHash,
+          syncVersion: { increment: 1 },
+        },
+      });
+
+      // Delete old component records
+      await prisma.rMSyncedEntryComponent.deleteMany({
+        where: { rmSyncedEntryId: syncedEntryId },
+      });
+
+      // Create new component records
+      await prisma.rMSyncedEntryComponent.createMany({
+        data: aggregate.contributingEntries.map(entry => ({
+          rmSyncedEntryId: syncedEntryId,
+          timesheetEntryId: entry.id,
+          durationMinutes: entry.duration,
+          isBillable: entry.isBillable,
+          notes: entry.notes,
+        })),
+      });
+    } catch (updateError) {
+      // If entry was deleted in RM (404), recreate it
+      if (updateError instanceof RMNotFoundError) {
+        console.log(`[RM Sync] Entry ${existingSyncedEntry.rmEntryId} not found in RM (likely deleted), recreating...`);
+
+        // Delete orphaned sync record and components
+        await prisma.rMSyncedEntry.delete({
+          where: { id: existingSyncedEntry.id },
+        });
+
+        // Create new entry in RM
+        rmEntry = await rmApi.createTimeEntry(token, rmUserId, rmPayload);
+        action = "created";
+        console.log(`[RM Sync] Successfully recreated entry in RM with new ID ${rmEntry.id}`);
+
+        // Create new synced entry record
+        const newSyncedEntry = await prisma.rMSyncedEntry.create({
+          data: {
+            mappingId: mapping.id,
+            aggregationDate: aggregate.date,
+            rmEntryId: rmEntry.id,
+            lastSyncedAt: new Date(),
+            lastSyncedHash: aggregate.aggregateHash,
+            syncVersion: 1,
+          },
+        });
+
+        syncedEntryId = newSyncedEntry.id;
+
+        // Create component records
+        await prisma.rMSyncedEntryComponent.createMany({
+          data: aggregate.contributingEntries.map(entry => ({
+            rmSyncedEntryId: syncedEntryId,
+            timesheetEntryId: entry.id,
+            durationMinutes: entry.duration,
+            isBillable: entry.isBillable,
+            notes: entry.notes,
+          })),
+        });
+      } else {
+        // Re-throw other errors
+        throw updateError;
+      }
+    }
+  } else {
+    // Create new entry in RM
+    console.log('[RM Sync] Creating RM entry:', rmPayload);
+
+    rmEntry = await rmApi.createTimeEntry(token, rmUserId, rmPayload);
+    action = "created";
+
+    console.log('[RM Sync] RM entry created:', { rmEntryId: rmEntry.id });
+
+    // Create synced entry record
+    const newSyncedEntry = await prisma.rMSyncedEntry.create({
+      data: {
+        mappingId: mapping.id,
+        aggregationDate: aggregate.date,
+        rmEntryId: rmEntry.id,
+        lastSyncedAt: new Date(),
+        lastSyncedHash: aggregate.aggregateHash,
+        syncVersion: 1,
+      },
+    });
+
+    syncedEntryId = newSyncedEntry.id;
+
+    // Create component records
+    await prisma.rMSyncedEntryComponent.createMany({
+      data: aggregate.contributingEntries.map(entry => ({
+        rmSyncedEntryId: syncedEntryId,
+        timesheetEntryId: entry.id,
+        durationMinutes: entry.duration,
+        isBillable: entry.isBillable,
+        notes: entry.notes,
+      })),
+    });
+  }
+
+  return { rmEntry, action, syncedEntryId };
+}
+
+/**
  * Execute sync for timesheet entries in date range (using aggregation)
  * This performs the actual API calls to RM, syncing one aggregated entry per project-day
  * @param forceSync - If true, ignores hash comparison and always updates/creates entries in RM
@@ -655,111 +826,14 @@ export async function executeSyncEntries(
         continue;
       }
 
-      // Prepare RM API payload with billable status
-      const rmPayload = {
-        assignable_id: mapping.rmProjectId,
-        date: dateStr,
-        hours: aggregate.totalHours,
-        notes: aggregate.notes || undefined,
-        task: mapBillableToTask(aggregate.isBillable), // Map boolean to task string
-      };
-
-      let rmEntry;
-      let action: "created" | "updated";
-
-      if (existingSyncedEntry) {
-        // Update existing entry in RM
-        console.log('[RM Sync] Updating RM entry:', {
-          rmEntryId: existingSyncedEntry.rmEntryId,
-          ...rmPayload,
-        });
-
-        try {
-          rmEntry = await rmApi.updateTimeEntry(
-            token,
-            rmUserId,
-            Number(existingSyncedEntry.rmEntryId),
-            rmPayload
-          );
-          action = "updated";
-        } catch (updateError) {
-          // If entry was deleted in RM (404), recreate it
-          if (updateError instanceof RMNotFoundError) {
-            console.log(`[RM Sync] Entry ${existingSyncedEntry.rmEntryId} not found in RM (likely deleted), recreating...`);
-
-            // Delete orphaned sync record and components
-            await prisma.rMSyncedEntry.delete({
-              where: { id: existingSyncedEntry.id },
-            });
-
-            // Create new entry in RM
-            rmEntry = await rmApi.createTimeEntry(token, rmUserId, rmPayload);
-            action = "created";
-            console.log(`[RM Sync] Successfully recreated entry in RM with new ID ${rmEntry.id}`);
-          } else {
-            // Re-throw other errors
-            throw updateError;
-          }
-        }
-
-        // Update synced entry record
-        await prisma.rMSyncedEntry.update({
-          where: { id: existingSyncedEntry.id },
-          data: {
-            rmEntryId: rmEntry.id,
-            lastSyncedAt: new Date(),
-            lastSyncedHash: aggregate.aggregateHash,
-            syncVersion: { increment: 1 },
-          },
-        });
-
-        // Delete old component records
-        await prisma.rMSyncedEntryComponent.deleteMany({
-          where: { rmSyncedEntryId: existingSyncedEntry.id },
-        });
-
-        // Create new component records
-        await prisma.rMSyncedEntryComponent.createMany({
-          data: aggregate.contributingEntries.map(entry => ({
-            rmSyncedEntryId: existingSyncedEntry.id,
-            timesheetEntryId: entry.id,
-            durationMinutes: entry.duration,
-            isBillable: entry.isBillable,
-            notes: entry.notes,
-          })),
-        });
-      } else {
-        // Create new entry in RM
-        console.log('[RM Sync] Creating RM entry:', rmPayload);
-
-        rmEntry = await rmApi.createTimeEntry(token, rmUserId, rmPayload);
-        action = "created";
-
-        console.log('[RM Sync] RM entry created:', { rmEntryId: rmEntry.id });
-
-        // Create synced entry record
-        const newSyncedEntry = await prisma.rMSyncedEntry.create({
-          data: {
-            mappingId: mapping.id,
-            aggregationDate: aggregate.date,
-            rmEntryId: rmEntry.id,
-            lastSyncedAt: new Date(),
-            lastSyncedHash: aggregate.aggregateHash,
-            syncVersion: 1,
-          },
-        });
-
-        // Create component records
-        await prisma.rMSyncedEntryComponent.createMany({
-          data: aggregate.contributingEntries.map(entry => ({
-            rmSyncedEntryId: newSyncedEntry.id,
-            timesheetEntryId: entry.id,
-            durationMinutes: entry.duration,
-            isBillable: entry.isBillable,
-            notes: entry.notes,
-          })),
-        });
-      }
+      // Sync aggregate to RM using helper function
+      const { rmEntry, action } = await syncAggregateToRM(
+        token,
+        rmUserId,
+        mapping,
+        aggregate,
+        existingSyncedEntry
+      );
 
       // Update mapping last synced timestamp
       await prisma.rMProjectMapping.update({
@@ -803,8 +877,8 @@ export async function executeSyncEntries(
         await new Promise((resolve) => setTimeout(resolve, 2000));
 
         try {
-          // Retry the operation
-          const existingSyncedEntry = await prisma.rMSyncedEntry.findUnique({
+          // Retry the operation - re-fetch existingSyncedEntry in case it changed
+          const retryExistingSyncedEntry = await prisma.rMSyncedEntry.findUnique({
             where: {
               mappingId_aggregationDate: {
                 mappingId: mapping.id,
@@ -813,71 +887,14 @@ export async function executeSyncEntries(
             },
           });
 
-          const rmPayload = {
-            assignable_id: mapping.rmProjectId,
-            date: dateStr,
-            hours: aggregate.totalHours,
-            notes: aggregate.notes || undefined,
-            task: mapBillableToTask(aggregate.isBillable),
-          };
-
-          let rmEntry;
-          if (existingSyncedEntry) {
-            rmEntry = await rmApi.updateTimeEntry(
-              token,
-              rmUserId,
-              Number(existingSyncedEntry.rmEntryId),
-              rmPayload
-            );
-
-            await prisma.rMSyncedEntry.update({
-              where: { id: existingSyncedEntry.id },
-              data: {
-                lastSyncedAt: new Date(),
-                lastSyncedHash: aggregate.aggregateHash,
-                syncVersion: { increment: 1 },
-              },
-            });
-
-            // Delete old component records
-            await prisma.rMSyncedEntryComponent.deleteMany({
-              where: { rmSyncedEntryId: existingSyncedEntry.id },
-            });
-
-            // Create new component records
-            await prisma.rMSyncedEntryComponent.createMany({
-              data: aggregate.contributingEntries.map(entry => ({
-                rmSyncedEntryId: existingSyncedEntry.id,
-                timesheetEntryId: entry.id,
-                durationMinutes: entry.duration,
-                isBillable: entry.isBillable,
-                notes: entry.notes,
-              })),
-            });
-          } else {
-            rmEntry = await rmApi.createTimeEntry(token, rmUserId, rmPayload);
-
-            const newSyncedEntry = await prisma.rMSyncedEntry.create({
-              data: {
-                mappingId: mapping.id,
-                aggregationDate: aggregate.date,
-                rmEntryId: rmEntry.id,
-                lastSyncedAt: new Date(),
-                lastSyncedHash: aggregate.aggregateHash,
-                syncVersion: 1,
-              },
-            });
-
-            await prisma.rMSyncedEntryComponent.createMany({
-              data: aggregate.contributingEntries.map(entry => ({
-                rmSyncedEntryId: newSyncedEntry.id,
-                timesheetEntryId: entry.id,
-                durationMinutes: entry.duration,
-                isBillable: entry.isBillable,
-                notes: entry.notes,
-              })),
-            });
-          }
+          // Use helper function for retry
+          const { rmEntry, action } = await syncAggregateToRM(
+            token,
+            rmUserId,
+            mapping,
+            aggregate,
+            retryExistingSyncedEntry
+          );
 
           // Retry succeeded
           failed--; // Undo the failed increment
@@ -886,7 +903,7 @@ export async function executeSyncEntries(
             results.push({
               timesheetEntryId: entryId,
               status: "success",
-              action: existingSyncedEntry ? "updated" : "created",
+              action,
               rmEntryId: rmEntry.id,
             });
           }

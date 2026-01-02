@@ -170,7 +170,7 @@ export class RMApiClient {
       if (!bodyText.trim()) {
         return undefined as T;
       }
-      
+
       try {
         return JSON.parse(bodyText) as T;
       } catch (parseError) {
@@ -180,7 +180,7 @@ export class RMApiClient {
         );
       }
   } catch (error) {
-   // Re-throw our custom errors
+    // Re-throw our custom errors
     if (error instanceof RMApiError) {
       throw error;
     }

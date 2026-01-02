@@ -54,9 +54,19 @@ export class RuleCache {
     if (redisClient.isConnected()) {
       const cached = await redisClient.get<(CategoryRule & { project: Project })[]>(cacheKey)
       if (cached) {
+        // Hydrate all date fields from Redis (stored as ISO strings)
         const hydrated = cached.map(rule => ({
           ...rule,
+          // CategoryRule date fields
+          createdAt: new Date(rule.createdAt),
+          updatedAt: new Date(rule.updatedAt),
           lastMatchedAt: rule.lastMatchedAt ? new Date(rule.lastMatchedAt) : null,
+          // Nested Project date fields (safely check for project existence)
+          project: rule.project ? {
+            ...rule.project,
+            createdAt: new Date(rule.project.createdAt),
+            lastUsedAt: new Date(rule.project.lastUsedAt),
+          } : rule.project,
         }))
         this.hits++
         this.redisHits++

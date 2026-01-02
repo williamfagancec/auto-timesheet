@@ -9,6 +9,7 @@
  */
 
 import { PrismaClient } from '@prisma/client'
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library'
 import { CategoryRuleType } from 'shared'
 import { extractPatternsFromEvent, type CalendarEventInput } from './ai-categorization'
 
@@ -190,60 +191,53 @@ export async function strengthenRules(
     let created = 0
     let updated = 0
 
-    // Process each pattern
+    // Process each pattern using atomic create-or-update to avoid race conditions
     for (const pattern of sortedPatterns) {
-      // Check if rule exists before upserting
-      const existingRule = await prisma.categoryRule.findUnique({
-        where: {
-          userId_ruleType_condition_projectId: {
+      try {
+        // Attempt atomic create first (optimistic approach)
+        await prisma.categoryRule.create({
+          data: {
             userId,
             ruleType: pattern.ruleType,
             condition: pattern.condition,
             projectId,
+            confidenceScore: LEARNING_CONFIG.initialConfidence,
+            matchCount: 1,
+            accuracy: 0,
+            totalSuggestions: 0,
+            lastMatchedAt: now,
           },
-        },
-        select: { id: true },
-      })
-
-      // Use upsert to create or update the rule
-      await prisma.categoryRule.upsert({
-        where: {
-          userId_ruleType_condition_projectId: {
-            userId,
-            ruleType: pattern.ruleType,
-            condition: pattern.condition,
-            projectId,
-          },
-        },
-        update: {
-          // Boost confidence by 10%, capped at 95%
-          confidenceScore: {
-            increment: LEARNING_CONFIG.confidenceBoost,
-          },
-          matchCount: {
-            increment: 1,
-          },
-          lastMatchedAt: now,
-          updatedAt: now,
-        },
-        create: {
-          userId,
-          ruleType: pattern.ruleType,
-          condition: pattern.condition,
-          projectId,
-          confidenceScore: LEARNING_CONFIG.initialConfidence,
-          matchCount: 1,
-          accuracy: 0,
-          totalSuggestions: 0,
-          lastMatchedAt: now,
-        },
-      })
-
-      // Track whether this was a create or update
-      if (existingRule) {
-        updated++
-      } else {
+        })
         created++
+      } catch (error) {
+        // If unique constraint violation (P2002), rule already exists - update it
+        if (error instanceof PrismaClientKnownRequestError && error.code === 'P2002') {
+          await prisma.categoryRule.update({
+            where: {
+              userId_ruleType_condition_projectId: {
+                userId,
+                ruleType: pattern.ruleType,
+                condition: pattern.condition,
+                projectId,
+              },
+            },
+            data: {
+              // Boost confidence by 10%, capped at 95%
+              confidenceScore: {
+                increment: LEARNING_CONFIG.confidenceBoost,
+              },
+              matchCount: {
+                increment: 1,
+              },
+              lastMatchedAt: now,
+              updatedAt: now,
+            },
+          })
+          updated++
+        } else {
+          // Rethrow any other errors (database errors, connection issues, etc.)
+          throw error
+        }
       }
     }
 
