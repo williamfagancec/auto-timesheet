@@ -293,19 +293,23 @@ importers:
         version: 5.4.21(@types/node@20.19.24)
 
   packages/config:
+    dependencies:
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
     devDependencies:
       '@types/node':
         specifier: ^25.0.2
         version: 25.0.2
-      typescript:
-        specifier: ^5.3.3
-        version: 5.9.3
 
   packages/database:
     dependencies:
       '@prisma/client':
         specifier: ^5.8.0
         version: 5.22.0(prisma@5.22.0)
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
     devDependencies:
       prisma:
         specifier: ^5.8.0
@@ -313,22 +317,18 @@ importers:
       tsx:
         specifier: ^4.20.6
         version: 4.20.6
-      typescript:
-        specifier: ^5.3.3
-        version: 5.9.3
 
   packages/shared:
     dependencies:
       redis:
         specifier: ^4.6.12
         version: 4.7.1
-      zod:
-        specifier: ^3.22.4
-        version: 3.25.76
-    devDependencies:
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
+      zod:
+        specifier: ^3.22.4
+        version: 3.25.76
 
 packages:
 
