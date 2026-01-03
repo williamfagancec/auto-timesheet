@@ -16,9 +16,7 @@
   },
   "dependencies": {
     "redis": "^4.6.12",
-    "zod": "^3.22.4"
-  },
-  "devDependencies": {
+    "zod": "^3.22.4",
     "typescript": "^5.3.3"
   }
 }
