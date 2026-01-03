@@ -83,7 +83,7 @@ export const prisma = global.prisma || new PrismaClient({
 })
 
 // Prisma middleware to encrypt/decrypt OAuth tokens transparently
-prisma.$use(async (params, next) => {
+prisma.$use(async (params: any, next: any) => {
   // Encrypt tokens before writing to database
   if (params.model === 'Account') {
     if (params.action === 'create' || params.action === 'update' || params.action === 'upsert') {
@@ -142,8 +142,7 @@ prisma.$use(async (params, next) => {
 
 // Log slow queries in development (>100ms)
 if (process.env.NODE_ENV === 'development') {
-  // @ts-expect-error - query event not in default types
-  prisma.$on('query', (e: { duration: number; query: string }) => {
+  prisma.$on('query' as any, (e: { duration: number; query: string }) => {
     if (e.duration > 100) {
       console.log(`[Slow Query] ${e.duration}ms: ${e.query.substring(0, 100)}...`)
     }
