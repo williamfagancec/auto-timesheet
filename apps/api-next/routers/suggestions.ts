@@ -2,12 +2,12 @@ import { router, protectedProcedure } from '../lib/trpc'
 import { z } from 'zod'
 import { prisma } from 'database'
 import { TRPCError } from '@trpc/server'
-import { getSuggestionsForEvent } from '../../services/ai-categorization.js'
+import { getSuggestionsForEvent } from '../services/ai-categorization'
 import {
   handleCategorizationFeedback,
   getDebugInfo,
-} from '../../services/learning.js'
-import { logSuggestion, type SuggestionOutcome } from '../../services/analytics.js'
+} from '../services/learning'
+import { logSuggestion, type SuggestionOutcome } from '../services/analytics'
 
 // =============================================================================
 // INPUT SCHEMAS
@@ -31,23 +31,6 @@ const feedbackInputSchema = z.object({
   selectedProjectId: z.string().cuid(),
   suggestedProjectId: z.string().cuid().nullable().optional(),
   suggestedConfidence: z.number().min(0).max(1).optional(),
-})
-
-// =============================================================================
-// OUTPUT TYPES
-// =============================================================================
-
-/**
- * Suggestion output format
- * Note: Currently unused, but kept for future validation
- */
-// @ts-expect-error - Kept for future use
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const suggestionSchema = z.object({
-  projectId: z.string(),
-  projectName: z.string(),
-  confidence: z.number(),
-  reasoning: z.array(z.string()),
 })
 
 // =============================================================================
@@ -229,13 +212,8 @@ export const suggestionsRouter = router({
           }
         }
 
-        // Get rules BEFORE feedback (for counting)
-        const rulesBefore = await prisma.categoryRule.count({
-          where: { userId: ctx.user.id },
-        })
-
         // Call LearningService to handle feedback
-        await handleCategorizationFeedback(
+        const feedbackResult = await handleCategorizationFeedback(
           prisma,
           input.eventId,
           input.selectedProjectId,
@@ -273,17 +251,9 @@ export const suggestionsRouter = router({
           }
         }
 
-        // Get rules AFTER feedback (for counting)
-        const rulesAfter = await prisma.categoryRule.count({
-          where: { userId: ctx.user.id },
-        })
-
-        const rulesCreated = rulesAfter - rulesBefore
-        const rulesUpdated = rulesCreated > 0 ? 0 : 1 // If no new rules, assume existing were updated
-
         return {
-          rulesCreated,
-          rulesUpdated,
+          rulesCreated: feedbackResult.created,
+          rulesUpdated: feedbackResult.updated,
         }
       } catch (error) {
         // Re-throw TRPCError as-is
@@ -308,16 +278,19 @@ export const suggestionsRouter = router({
    *
    * Returns:
    * - accuracyRate: Overall accuracy across all rules (0.0-1.0)
-   * - coverageRate: Percentage of events with suggestions (0.0-1.0)
+   * - coverageRate: Categorization coverage - % of recent events assigned to a project (0.0-1.0)
    * - activeRulesCount: Total number of active rules
    * - rulesByType: Breakdown of rules by type
    * - totalSuggestions: Total suggestions made
    * - totalMatches: Total suggestions accepted
    *
+   * Note: coverageRate measures categorization (events with timesheet entries), not AI suggestions.
+   * To track actual suggestion coverage, add a separate query counting distinct events in SuggestionLog.
+   *
    * @example
    * Output: {
    *   accuracyRate: 0.73,
-   *   coverageRate: 0.82,
+   *   coverageRate: 0.82,  // 82% of recent events have been categorized
    *   activeRulesCount: 42,
    *   rulesByType: { RECURRING_EVENT_ID: 8, ATTENDEE_EMAIL: 15, ... },
    *   totalSuggestions: 156,
@@ -329,8 +302,8 @@ export const suggestionsRouter = router({
       // Get debug info from learning service (contains all stats)
       const debugInfo = await getDebugInfo(prisma, ctx.user.id)
 
-      // Calculate coverage rate: % of recent events with suggestions
-      // Look at events from the last 30 days
+      // Calculate categorization coverage: % of recent events assigned to a project in the last 30 days
+      // Note: This measures events with timesheet entries, NOT events that received AI suggestions
       const thirtyDaysAgo = new Date()
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
@@ -342,7 +315,7 @@ export const suggestionsRouter = router({
         },
       })
 
-      // Count events with timesheet entries (categorized)
+      // Count events with timesheet entries (categorized/assigned to a project)
       const categorizedEvents = await prisma.timesheetEntry.count({
         where: {
           userId: ctx.user.id,

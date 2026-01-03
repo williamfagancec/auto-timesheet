@@ -7,7 +7,10 @@ import { TRPCError } from '@trpc/server'
  * Get or create user project defaults
  * Returns the default billable status and phase for a user
  */
-async function getOrCreateUserDefaults(tx: any, userId: string) {
+async function getOrCreateUserDefaults(
+  tx: Omit<typeof prisma, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>,
+  userId: string
+) {
   let defaults = await tx.userProjectDefaults.findUnique({
     where: { userId },
   })
@@ -402,25 +405,6 @@ export const timesheetRouter = router({
                 created.push(entry.eventId)
               }
 
-             let lastBillableValue: boolean | undefined
-
-             for (const entry of input.entries) {
-              // ... existing entry processing ...
-
-              if (entry.isBillable !== undefined) {
-                lastBillableValue = entry.isBillable
-              }
-              // ... rest of loop ...
-             }
-
-             // Update user defaults once after processing all entries
-             if (lastBillableValue !== undefined) {
-              await tx.userProjectDefaults.update({
-                where: { userId: ctx.user.id },
-                  data: { isBillable: lastBillableValue },
-              })
-             }
-
               // Increment project use count
               await tx.project.update({
                 where: { id: entry.projectId },
@@ -436,6 +420,16 @@ export const timesheetRouter = router({
                 error: error instanceof Error ? error.message : 'Unknown error',
               })
             }
+          }
+
+          // Update user defaults once after processing all entries
+          // Use the last explicitly provided isBillable value
+          const lastBillableEntry = input.entries.slice().reverse().find(e => e.isBillable !== undefined)
+          if (lastBillableEntry?.isBillable !== undefined) {
+            await tx.userProjectDefaults.update({
+              where: { userId: ctx.user.id},
+              data: { isBillable: lastBillableEntry.isBillable },
+            })
           }
 
           return { created, updated, errors }

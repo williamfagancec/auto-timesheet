@@ -6,7 +6,7 @@ import {
   getSuggestionMetrics,
   getProblematicPatterns,
   type MetricsTimeRange,
-} from '../../services/analytics.js'
+} from '../services/analytics'
 
 // =============================================================================
 // INPUT SCHEMAS

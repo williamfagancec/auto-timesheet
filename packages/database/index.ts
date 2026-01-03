@@ -2,12 +2,17 @@ import { PrismaClient } from '@prisma/client'
 import type { Prisma } from '@prisma/client'
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 
-declare global {
-  var prisma: PrismaClient | undefined
-}
-
 const databaseUrl = process.env.DATABASE_URL;
 const isProduction = process.env.NODE_ENV === 'production';
+
+// Define the extended Prisma client type
+type ExtendedPrismaClient = PrismaClient & {
+  $on(event: 'query', callback: (e: Prisma.QueryEvent) => void): void;
+}
+
+declare global {
+  var prisma: ExtendedPrismaClient | undefined
+}
 
 // Encryption utilities for OAuth tokens
 // Uses the same ENCRYPTION_KEY as other token encryption in the app
@@ -64,26 +69,30 @@ function decryptToken(encryptedData: string | null | undefined): string | null {
   return decrypted.toString('utf8');
 }
 
-export const prisma = global.prisma || new PrismaClient({
-  log: process.env.NODE_ENV === 'development'
-    ? [
-        { level: 'query', emit: 'event' },
-        { level: 'warn', emit: 'stdout' },
-        { level: 'error', emit: 'stdout' }
-      ]
-    : ['error'],
+const prismaClientSingleton = () => {
+  return new PrismaClient({
+    log: process.env.NODE_ENV === 'development'
+      ? [
+          { level: 'query', emit: 'event' },
+          { level: 'warn', emit: 'stdout' },
+          { level: 'error', emit: 'stdout' }
+        ]
+      : ['error'],
 
-    ...(databaseUrl && isProduction ? {
-    datasources: {
-      db: {
-        url: databaseUrl + (databaseUrl.includes('?') ? '&' : '?') + 'pgbouncer=true',
+      ...(databaseUrl && isProduction ? {
+      datasources: {
+        db: {
+          url: databaseUrl + (databaseUrl.includes('?') ? '&' : '?') + 'pgbouncer=true',
+        },
       },
-    },
-  } : {}),
-})
+    } : {}),
+  })
+}
+
+export const prisma = (global.prisma || prismaClientSingleton()) as ExtendedPrismaClient
 
 // Prisma middleware to encrypt/decrypt OAuth tokens transparently
-prisma.$use(async (params, next) => {
+prisma.$use(async (params: any, next: any) => {
   // Encrypt tokens before writing to database
   if (params.model === 'Account') {
     if (params.action === 'create' || params.action === 'update' || params.action === 'upsert') {
@@ -142,8 +151,7 @@ prisma.$use(async (params, next) => {
 
 // Log slow queries in development (>100ms)
 if (process.env.NODE_ENV === 'development') {
-  // @ts-expect-error - query event not in default types
-  prisma.$on('query', (e: { duration: number; query: string }) => {
+  prisma.$on('query', (e) => {
     if (e.duration > 100) {
       console.log(`[Slow Query] ${e.duration}ms: ${e.query.substring(0, 100)}...`)
     }
@@ -155,3 +163,4 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 export * from '@prisma/client'
+export { PrismaClientKnownRequestError } from '@prisma/client/runtime/library'

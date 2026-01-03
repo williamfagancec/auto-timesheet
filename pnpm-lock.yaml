@@ -124,15 +124,27 @@ importers:
 
   apps/api-next:
     dependencies:
-      '@node-rs/argon2':
-        specifier: ^2.0.2
-        version: 2.0.2
       '@trpc/client':
         specifier: ^11.0.0
         version: 11.7.1(@trpc/server@11.7.1)(typescript@5.9.3)
       '@trpc/server':
         specifier: ^11.0.0
         version: 11.7.1(typescript@5.9.3)
+      '@types/bcryptjs':
+        specifier: ^3.0.0
+        version: 3.0.0
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.24
+      '@types/react':
+        specifier: ^18.2.0
+        version: 18.3.26
+      '@types/react-dom':
+        specifier: ^18.2.0
+        version: 18.3.7(@types/react@18.3.26)
+      bcryptjs:
+        specifier: ^3.0.3
+        version: 3.0.3
       better-auth:
         specifier: ^1.4.9
         version: 1.4.9(@prisma/client@5.22.0)(next@14.2.35)(react-dom@18.3.1)(react@18.3.1)
@@ -142,6 +154,12 @@ importers:
       database:
         specifier: workspace:*
         version: link:../../packages/database
+      date-fns:
+        specifier: 2.30.0
+        version: 2.30.0
+      date-fns-tz:
+        specifier: 2.0.1
+        version: 2.0.1(date-fns@2.30.0)
       next:
         specifier: ^14.2.0
         version: 14.2.35(react-dom@18.3.1)(react@18.3.1)
@@ -157,22 +175,12 @@ importers:
       superjson:
         specifier: ^2.2.1
         version: 2.2.6
-      zod:
-        specifier: ^3.22.4
-        version: 3.25.76
-    devDependencies:
-      '@types/node':
-        specifier: ^20.0.0
-        version: 20.19.24
-      '@types/react':
-        specifier: ^18.2.0
-        version: 18.3.26
-      '@types/react-dom':
-        specifier: ^18.2.0
-        version: 18.3.7(@types/react@18.3.26)
       typescript:
         specifier: ^5.3.0
         version: 5.9.3
+      zod:
+        specifier: ^3.22.4
+        version: 3.25.76
 
   apps/web:
     dependencies:
@@ -284,7 +292,7 @@ importers:
         version: 5.4.21(@types/node@20.19.24)
 
   packages/config:
-    devDependencies:
+    dependencies:
       '@types/node':
         specifier: ^25.0.2
         version: 25.0.2
@@ -297,29 +305,34 @@ importers:
       '@prisma/client':
         specifier: ^5.8.0
         version: 5.22.0(prisma@5.22.0)
-    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.24
       prisma:
         specifier: ^5.8.0
         version: 5.22.0
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+    devDependencies:
       tsx:
         specifier: ^4.20.6
         version: 4.20.6
-      typescript:
-        specifier: ^5.3.3
-        version: 5.9.3
 
   packages/shared:
     dependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.24
       redis:
         specifier: ^4.6.12
         version: 4.7.1
-      zod:
-        specifier: ^3.22.4
-        version: 3.25.76
-    devDependencies:
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
+      zod:
+        specifier: ^3.22.4
+        version: 3.25.76
 
 packages:
 
@@ -2808,6 +2821,13 @@ packages:
       '@babel/types': 7.28.5
     dev: true
 
+  /@types/bcryptjs@3.0.0:
+    resolution: {integrity: sha512-WRZOuCuaz8UcZZE4R5HXTco2goQSI2XxjGY3hbM/xDvwmqFWd4ivooImsMx65OKM6CtNKbnZ5YL+YwAwK7c1dg==}
+    deprecated: This is a stub types definition. bcryptjs provides its own type definitions, so you do not need this installed.
+    dependencies:
+      bcryptjs: 3.0.3
+    dev: false
+
   /@types/chai@5.2.3:
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
     dependencies:
@@ -2833,7 +2853,7 @@ packages:
     resolution: {integrity: sha512-gWEkeiyYE4vqjON/+Obqcoeffmk0NF15WSBwSs7zwVA2bAbTaE0SJ7P0WNGoJn8uE7fiaV5a7dKYIJriEqOrmA==}
     dependencies:
       undici-types: 7.16.0
-    dev: true
+    dev: false
 
   /@types/prop-types@15.7.15:
     resolution: {integrity: sha512-F6bEyamV9jKGAFBEmlQnesRPGOQqS2+Uwi0Em15xenOxHaf2hv6L8YCVn3rPdPJOiJfPiCnLIRyvwVaqMY3MIw==}
@@ -3234,6 +3254,11 @@ packages:
   /baseline-browser-mapping@2.8.23:
     resolution: {integrity: sha512-616V5YX4bepJFzNyOfce5Fa8fDJMfoxzOIzDCZwaGL8MKVpFrXqfNUoIpRn9YMI5pXf/VKgzjB4htFMsFKKdiQ==}
     hasBin: true
+
+  /bcryptjs@3.0.3:
+    resolution: {integrity: sha512-GlF5wPWnSa/X5LKM1o0wz0suXIINz1iHRLvTS+sLyi7XPbe5ycmYI3DlZqVGZZtDgl4DmasFg7gOB3JYbphV5g==}
+    hasBin: true
+    dev: false
 
   /better-auth@1.4.9(@prisma/client@5.22.0)(next@14.2.35)(react-dom@18.3.1)(react@18.3.1):
     resolution: {integrity: sha512-usSdjuyTzZwIvM8fjF8YGhPncxV3MAg3dHUO9uPUnf0yklXUSYISiH1+imk6/Z+UBqsscyyPRnbIyjyK97p7YA==}
@@ -5594,7 +5619,7 @@ packages:
 
   /undici-types@7.16.0:
     resolution: {integrity: sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw==}
-    dev: true
+    dev: false
 
   /update-browserslist-db@1.1.4(browserslist@4.27.0):
     resolution: {integrity: sha512-q0SPT4xyU84saUX+tomz1WLkxUbuaJnR1xWt17M7fJtEJigJeWUNGUqrauFXsHnqev9y9JTRGwk13tFBuKby4A==}

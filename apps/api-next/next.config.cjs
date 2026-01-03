@@ -2,10 +2,8 @@
 const nextConfig = {
   transpilePackages: ['database', 'shared', 'config'],
   experimental: {
-    serverComponentsExternalPackages: ['@prisma/client', '@node-rs/argon2'],
+    serverComponentsExternalPackages: ['@prisma/client'],
   },
-  // Generate standalone build for serverless deployment
-  output: 'standalone',
 }
 
 module.exports = nextConfig

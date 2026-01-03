@@ -8,9 +8,9 @@
  * @see docs/AI_ENGINE.md Phase 5: Learning & Feedback
  */
 
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, PrismaClientKnownRequestError } from 'database'
 import { CategoryRuleType } from 'shared'
-import { extractPatternsFromEvent, type CalendarEventInput } from './ai-categorization.js'
+import { extractPatternsFromEvent, type CalendarEventInput } from './ai-categorization'
 
 /**
  * Extracted pattern from event
@@ -61,15 +61,13 @@ const LEARNING_CONFIG = {
  * @param selectedProjectId - Project ID the user selected
  * @param suggestedProjectId - Project ID that was suggested (null if no suggestion)
  * @param userId - User ID
- * @returns Object with counts of created and updated rules
  *
  * @example
  * ```typescript
  * // User accepted a suggestion
- * const result = await handleCategorizationFeedback(
+ * await handleCategorizationFeedback(
  *   prisma, 'evt_123', 'proj_abc', 'proj_abc', 'user_xyz'
  * )
- * // Returns: { created: 2, updated: 1 }
  *
  * // User rejected suggestion and selected different project
  * await handleCategorizationFeedback(
@@ -192,60 +190,53 @@ export async function strengthenRules(
     let created = 0
     let updated = 0
 
-    // Process each pattern
+    // Process each pattern using atomic create-or-update to avoid race conditions
     for (const pattern of sortedPatterns) {
-      // Check if rule exists before upserting
-      const existingRule = await prisma.categoryRule.findUnique({
-        where: {
-          userId_ruleType_condition_projectId: {
+      try {
+        // Attempt atomic create first (optimistic approach)
+        await prisma.categoryRule.create({
+          data: {
             userId,
             ruleType: pattern.ruleType,
             condition: pattern.condition,
             projectId,
+            confidenceScore: LEARNING_CONFIG.initialConfidence,
+            matchCount: 1,
+            accuracy: 0,
+            totalSuggestions: 0,
+            lastMatchedAt: now,
           },
-        },
-        select: { id: true },
-      })
-
-      // Use upsert to create or update the rule
-      await prisma.categoryRule.upsert({
-        where: {
-          userId_ruleType_condition_projectId: {
-            userId,
-            ruleType: pattern.ruleType,
-            condition: pattern.condition,
-            projectId,
-          },
-        },
-        update: {
-          // Boost confidence by 10%, capped at 95%
-          confidenceScore: {
-            increment: LEARNING_CONFIG.confidenceBoost,
-          },
-          matchCount: {
-            increment: 1,
-          },
-          lastMatchedAt: now,
-          updatedAt: now,
-        },
-        create: {
-          userId,
-          ruleType: pattern.ruleType,
-          condition: pattern.condition,
-          projectId,
-          confidenceScore: LEARNING_CONFIG.initialConfidence,
-          matchCount: 1,
-          accuracy: 0,
-          totalSuggestions: 0,
-          lastMatchedAt: now,
-        },
-      })
-
-      // Track whether this was a create or update
-      if (existingRule) {
-        updated++
-      } else {
+        })
         created++
+      } catch (error) {
+        // If unique constraint violation (P2002), rule already exists - update it
+        if (error instanceof PrismaClientKnownRequestError && error.code === 'P2002') {
+          await prisma.categoryRule.update({
+            where: {
+              userId_ruleType_condition_projectId: {
+                userId,
+                ruleType: pattern.ruleType,
+                condition: pattern.condition,
+                projectId,
+              },
+            },
+            data: {
+              // Boost confidence by 10%, capped at 95%
+              confidenceScore: {
+                increment: LEARNING_CONFIG.confidenceBoost,
+              },
+              matchCount: {
+                increment: 1,
+              },
+              lastMatchedAt: now,
+              updatedAt: now,
+            },
+          })
+          updated++
+        } else {
+          // Rethrow any other errors (database errors, connection issues, etc.)
+          throw error
+        }
       }
     }
 
@@ -600,6 +591,7 @@ export async function getDebugInfo(
     condition: string
     projectId: string
     projectName: string
+    projectArchived: boolean
     confidenceScore: number
     accuracy: number
     matchCount: number

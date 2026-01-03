@@ -7,10 +7,10 @@ import { router, protectedProcedure } from "../lib/trpc";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { prisma } from "database";
-import * as RMConnection from "../../services/rm-connection";
-import { rmApi } from "../../services/rm-api";
-import { suggestMatches, getAutoMapSuggestions } from "../../services/rm-project-matching";
-import * as RMSync from "../../services/rm-sync";
+import * as RMConnection from "../services/rm-connection";
+import { rmApi } from "../services/rm-api";
+import { suggestMatches, getAutoMapSuggestions } from "../services/rm-project-matching";
+import * as RMSync from "../services/rm-sync";
 
 /**
  * Zod Schemas
@@ -128,6 +128,8 @@ export const rmRouter = router({
     /**
      * Delete RM connection
      * Removes connection and all related data (cascades to mappings, synced entries, logs)
+     *
+     * Idempotent: succeeds even if no connection exists
      */
     delete: protectedProcedure.mutation(async ({ ctx }) => {
       try {
@@ -138,8 +140,8 @@ export const rmRouter = router({
         };
       } catch (error) {
         throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "RM connection not found",
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to delete RM connection",
         });
       }
     }),

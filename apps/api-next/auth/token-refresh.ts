@@ -1,4 +1,4 @@
-import { auth } from './better-auth.js'
+import { auth } from './better-auth'
 import { prisma } from 'database'
 
 /**
@@ -39,8 +39,8 @@ export async function getValidAccessToken(
       where: {
         userId,
         providerId: provider, 
-      },
-   })
+       },
+      })
     } catch (dbError) {
       console.error('[Token Refresh] Failed to check account existence:', dbError)
       throw new Error('TOKEN_REFRESH_FAILED: Failed to verify Google Calendar connection. Please try again.')
