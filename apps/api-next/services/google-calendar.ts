@@ -13,6 +13,32 @@ export interface GoogleCalendar {
   accessRole: string
 }
 
+export interface GoogleCalendarEvent {
+  id: string
+  summary?: string
+  description?: string
+  location?: string
+  start: {
+    dateTime?: string
+    date?: string // for all-day events
+    timeZone?: string
+  }
+  end: {
+    dateTime?: string
+    date?: string
+    timeZone?: string
+  }
+  attendees?: Array<{
+    email: string
+    responseStatus: 'needsAction' | 'declined' | 'tentative' | 'accepted'
+    self?: boolean // Indicates if this attendee is the signed-in user
+  }>
+  status?: string // confirmed, tentative, cancelled
+  creator?: {
+    email: string
+  }
+}
+
 export interface GoogleCalendarListResponse {
   items: GoogleCalendar[]
 }

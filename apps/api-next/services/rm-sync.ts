@@ -7,8 +7,7 @@
  * log unconditionally and catches constraint violations to prevent duplicate syncs.
  */
 
-import { prisma } from "database";
-import { Prisma, RMSyncStatus, RMSyncDirection } from "@prisma/client";
+import { prisma, Prisma, RMSyncStatus, RMSyncDirection } from "database";
 import { rmApi, RMRateLimitError, RMNotFoundError } from "./rm-api";
 import { getDecryptedToken } from "./rm-connection";
 import {

@@ -8,8 +8,7 @@
  * @see docs/AI_ENGINE.md Phase 5: Learning & Feedback
  */
 
-import { PrismaClient } from '@prisma/client'
-import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library'
+import { PrismaClient, PrismaClientKnownRequestError } from 'database'
 import { CategoryRuleType } from 'shared'
 import { extractPatternsFromEvent, type CalendarEventInput } from './ai-categorization'
 

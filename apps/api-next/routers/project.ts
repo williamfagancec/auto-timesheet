@@ -1,7 +1,6 @@
 import { router, protectedProcedure } from '../lib/trpc'
 import { z } from 'zod'
-import { prisma } from 'database'
-import { Prisma } from '@prisma/client'
+import { prisma, Prisma } from 'database'
 import { TRPCError } from '@trpc/server'
 
 const projectNameSchema = z

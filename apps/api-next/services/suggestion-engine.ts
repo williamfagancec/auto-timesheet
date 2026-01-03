@@ -1,4 +1,4 @@
-import { PrismaClient, CategoryRule, Project } from '@prisma/client'
+import { PrismaClient, CategoryRule, Project } from 'database'
 import { calculateCombinedConfidence } from './ai-categorization'
 import type { CalendarEventInput } from './ai-categorization'
 import { AI_CONFIG } from 'config'

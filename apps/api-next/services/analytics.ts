@@ -8,7 +8,7 @@
  * @see docs/AI_ENGINE.md - Analytics & Optimization
  */
 
-import { PrismaClient, CategoryRule, Project } from '@prisma/client'
+import { PrismaClient, CategoryRule, Project } from 'database'
 import { CategoryRuleType, redisClient, type SuggestionOutcome } from 'shared'
 
 export type { SuggestionOutcome } from 'shared'

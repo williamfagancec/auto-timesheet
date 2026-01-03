@@ -9,7 +9,7 @@
  * - Notes: single note field per project-day aggregate
  */
 
-import { TimesheetEntry } from "@prisma/client";
+import { TimesheetEntry } from "database";
 import crypto from "crypto";
 
 /**

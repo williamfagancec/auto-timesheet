@@ -245,13 +245,13 @@ export async function saveEventsToDatabase(
               googleEventId: event.id,
               calendarId,
               title: event.summary || 'Untitled',
-              startTime: segment.startTime,e
+              startTime: segment.startTime,
               endTime: segment.endTime,
               attendees: event.attendees ? (structuredClone(event.attendees) as any) :
 undefined,
               location: event.location || null,
               status,
-              isAllday: false, // Multi-day splits are not all-day events
+              isAllDay: false, // Multi-day splits are not all-day events
               splitIndex: segment.splitIndex,
             },
           })

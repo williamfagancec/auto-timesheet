@@ -1,4 +1,4 @@
-import type { PrismaClient, CategoryRule, Project } from '@prisma/client'
+import type { PrismaClient, CategoryRule, Project } from 'database'
 import { redisClient } from 'shared'
 import { CACHE_CONFIG } from 'config'
 

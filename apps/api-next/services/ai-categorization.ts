@@ -7,7 +7,7 @@
  * @see docs/AI_ENGINE.md for complete architecture documentation
  */
 
-import { PrismaClient, CategoryRule, Project } from '@prisma/client'
+import { PrismaClient, CategoryRule, Project } from 'database'
 import { AI_CONFIG } from 'config'
 import { CategoryRuleType } from 'shared'
 import { updateRuleAccuracy as updateRuleAccuracyFromLearning } from './learning'
